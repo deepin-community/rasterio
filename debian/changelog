@@ -1,0 +1,580 @@
+rasterio (1.2.10-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 12 Oct 2021 05:53:02 +0200
+
+rasterio (1.2.9-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump debhelper compat to 12, changes:
+    - Drop --list-missing from dh_install
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 02 Oct 2021 07:16:13 +0200
+
+rasterio (1.2.8-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 10 Sep 2021 06:56:52 +0200
+
+rasterio (1.2.7-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump Standards-Version to 4.6.0, no changes.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 08 Sep 2021 07:01:36 +0200
+
+rasterio (1.2.6-1) unstable; urgency=medium
+
+  * Team upload.
+  * Move from experimental to unstable.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sun, 15 Aug 2021 17:19:04 +0200
+
+rasterio (1.2.6-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 23 Jun 2021 05:14:17 +0200
+
+rasterio (1.2.5-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 22 Jun 2021 06:39:43 +0200
+
+rasterio (1.2.4-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Refresh patches.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 01 Jun 2021 05:22:52 +0200
+
+rasterio (1.2.3-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 27 Apr 2021 05:52:39 +0200
+
+rasterio (1.2.2-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Update watch file for GitHub URL changes.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 07 Apr 2021 15:40:17 +0200
+
+rasterio (1.2.1-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 03 Mar 2021 19:34:29 +0100
+
+rasterio (1.2.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump watch file version to 4.
+  * Bump Standards-Version to 4.5.1, no changes.
+  * Add python3-shapely to build dependencies.
+  * Drop python3.8.patch, applied upstream. Refresh remaining patch.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Mon, 25 Jan 2021 05:40:40 +0100
+
+rasterio (1.1.8-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 21 Oct 2020 05:58:58 +0200
+
+rasterio (1.1.7-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 29 Sep 2020 17:23:23 +0200
+
+rasterio (1.1.6-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Add patch to fix SyntaxWarning with Python 3.8.
+  * Refresh patches.
+  * Drop obsolete testsuite-autopkgtest-missing override.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 15 Sep 2020 06:49:19 +0200
+
+rasterio (1.1.5-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Refresh patches.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 03 Jun 2020 05:52:48 +0200
+
+rasterio (1.1.4-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump debhelper compat to 10, changes:
+    - Drop --parallel option, enabled by default
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 07 May 2020 15:22:24 +0200
+
+rasterio (1.1.3-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump Standards-Version to 4.5.0, no changes.
+  * Update watch file to not match post releases.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 25 Feb 2020 05:56:21 +0100
+
+rasterio (1.1.2-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Drop Name field from upstream metadata.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 19 Dec 2019 05:25:17 +0100
+
+rasterio (1.1.1-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 14 Nov 2019 05:29:17 +0100
+
+rasterio (1.1.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump Standards-Version to 4.4.1, no changes.
+  * Drop clean-target.patch, applied upstream. Refresh remaining patch.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 08 Oct 2019 06:03:39 +0200
+
+rasterio (1.0.28-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 10 Sep 2019 06:10:59 +0200
+
+rasterio (1.0.27-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 06 Sep 2019 07:03:26 +0200
+
+rasterio (1.0.26-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 27 Aug 2019 05:53:36 +0200
+
+rasterio (1.0.25-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Refresh patches.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 07 Aug 2019 06:06:20 +0200
+
+rasterio (1.0.24-3) unstable; urgency=medium
+
+  * Team upload.
+  * Bump Standards-Version to 4.4.0, no changes.
+  * Drop Python 2 support.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sun, 21 Jul 2019 19:38:50 +0200
+
+rasterio (1.0.24-2) unstable; urgency=medium
+
+  * Team upload.
+  * Update gbp.conf to use --source-only-changes by default.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sun, 07 Jul 2019 10:52:22 +0200
+
+rasterio (1.0.24-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Update dh_install override to use --list-missing.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 06 Jun 2019 06:16:12 +0200
+
+rasterio (1.0.23-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Add patch to fix clean target.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 16 May 2019 06:15:05 +0200
+
+rasterio (1.0.22-1~exp1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 20 Mar 2019 17:09:03 +0100
+
+rasterio (1.0.21-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 01 Mar 2019 06:47:05 +0100
+
+rasterio (1.0.20-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 28 Feb 2019 06:44:39 +0100
+
+rasterio (1.0.19-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 27 Feb 2019 06:52:24 +0100
+
+rasterio (1.0.18-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 08 Feb 2019 07:03:16 +0100
+
+rasterio (1.0.17-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 06 Feb 2019 07:41:11 +0100
+
+rasterio (1.0.16-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 05 Feb 2019 15:34:38 +0100
+
+rasterio (1.0.15-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Mon, 28 Jan 2019 07:21:11 +0100
+
+rasterio (1.0.14-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump Standards-Version to 4.3.0, no changes.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 23 Jan 2019 06:59:47 +0100
+
+rasterio (1.0.13-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 15 Dec 2018 09:35:11 +0100
+
+rasterio (1.0.12-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 11 Dec 2018 09:30:56 +0100
+
+rasterio (1.0.11-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 01 Dec 2018 08:49:06 +0100
+
+rasterio (1.0.10-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 17 Nov 2018 07:44:56 +0100
+
+rasterio (1.0.9-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 26 Oct 2018 07:07:04 +0200
+
+rasterio (1.0.8-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 03 Oct 2018 07:06:34 +0200
+
+rasterio (1.0.7-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump minimum required cligj to 0.5.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 27 Sep 2018 07:37:43 +0200
+
+rasterio (1.0.6-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 25 Sep 2018 07:03:48 +0200
+
+rasterio (1.0.5-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 20 Sep 2018 07:19:02 +0200
+
+rasterio (1.0.4-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump Standards-Version to 4.2.1, no changes.
+  * Drop autopkgtests to test installability & module import.
+  * Add lintian override for testsuite-autopkgtest-missing.
+  * Update watch file to limit matches to archive path.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Mon, 17 Sep 2018 18:01:27 +0200
+
+rasterio (1.0.3-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 02 Aug 2018 07:08:13 +0200
+
+rasterio (1.0.2-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 28 Jul 2018 08:36:14 +0200
+
+rasterio (1.0.1-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 24 Jul 2018 07:09:22 +0200
+
+rasterio (1.0.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Update required build dependencies.
+  * Drop error-typo.patch, applied upstream. Refresh remaining patch.
+  * Remove hypotheses examples from dist-packages.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 13 Jul 2018 07:37:46 +0200
+
+rasterio (0.36.0-3) unstable; urgency=medium
+
+  * Team upload.
+  * Update watchfile to also match pre-releases.
+  * Bump Standards-Version to 4.1.5, no changes.
+  * Strip trailing whitespace from control & rules files.
+  * Update copyright-format URL to use HTTPS.
+  * Update Vcs-* URLs for Salsa.
+  * Add module import tests to autopkgtest configuration.
+  * Drop ancient X-Python-Version field.
+  * Include examples in rasterio package.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 11 Jul 2018 15:12:28 +0200
+
+rasterio (0.36.0-2) unstable; urgency=medium
+
+  * Team upload.
+  * Add patch to fix 'error' typo.
+  * Bump Standards-Version to 4.0.0, no changes.
+  * Add autopkgtest to test installability.
+  * Enable PIE hardening buildflags.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Mon, 26 Jun 2017 13:27:03 +0200
+
+rasterio (0.36.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Refresh patches.
+  * Update watch file to handle more tag conventions in filenamemangle.
+  * Add upstream metadata.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 15 Jun 2016 22:34:39 +0200
+
+rasterio (0.35.1-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Refresh patches.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 07 May 2016 14:29:50 +0200
+
+rasterio (0.35.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump Standards-Version to 3.9.8, no changes.
+  * Require at least python-affine 1.3.0.
+  * Add python{,3}-boto3 to build dependencies.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 04 May 2016 09:23:39 +0200
+
+rasterio (0.34.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 05 Apr 2016 19:54:02 +0200
+
+rasterio (0.33.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Combine help2man targets for rasterio.1.
+  * Override dh_python{2,3} to call dh_numpy{,3} too.
+  * Refresh 0001-Rename-rio-to-rasterio-Closes-788463.patch.
+  * Enable parallel builds.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 02 Apr 2016 01:58:51 +0200
+
+rasterio (0.32.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Drop transform-typo.patch, applied upstream.
+  * Enable all hardening buildflags.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 25 Mar 2016 00:27:31 +0100
+
+rasterio (0.31.0-3) unstable; urgency=medium
+
+  * Team upload.
+  * Update Vcs-Git URL to use HTTPS.
+  * Add patch for 'transform' typo.
+  * Bump Standards-Version to 3.9.7, no changes.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 02 Mar 2016 21:14:53 +0100
+
+rasterio (0.31.0-2) unstable; urgency=medium
+
+  * Team upload.
+  * Merge changes from previous uploads.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 25 Dec 2015 15:00:16 +0100
+
+rasterio (0.31.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Handle other tar extensions in filenamemangle.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 25 Dec 2015 14:31:26 +0100
+
+rasterio (0.30.0-1) unstable; urgency=medium
+
+  * Imported Upstream version 0.30.0
+
+ -- Johan Van de Wauw <johan@vandewauw.be>  Wed, 18 Nov 2015 13:15:04 +0100
+
+rasterio (0.29.0-1) unstable; urgency=medium
+
+  * Imported Upstream version 0.29.0
+
+ -- Johan Van de Wauw <johan@vandewauw.be>  Mon, 26 Oct 2015 11:12:38 +0100
+
+rasterio (0.28.0-1) unstable; urgency=medium
+
+  * Imported Upstream version 0.28.0
+  * Refresh patch
+
+ -- Johan Van de Wauw <johan@vandewauw.be>  Thu, 15 Oct 2015 10:37:57 +0200
+
+rasterio (0.27.0-2) unstable; urgency=medium
+
+  * add rasterio/rasterfill.cpp to d/copyright, after FTP-master comments
+
+ -- Johan Van de Wauw <johan@vandewauw.be>  Mon, 12 Oct 2015 14:50:37 +0200
+
+rasterio (0.27.0-1) unstable; urgency=medium
+
+  * Imported Upstream version 0.27.0
+  * Add python3 support
+  * Remove patches added upstream
+  * Override tests to always succeed
+  * Add rule to regenerate manfile
+  * Remove python3-enum34
+  * Add Cython3 B/D
+  * Compatibility with python 3.5
+  * Base rasterio binary on Python 3 instead of Python 2
+  * Update manfile/manfile generation
+
+ -- Johan Van de Wauw <johan@vandewauw.be>  Tue, 29 Sep 2015 08:47:59 +0200
+
+rasterio (0.26.0-1) unstable; urgency=medium
+
+  * Specify that rasterio requires cligj >0.2
+  * Imported Upstream version 0.26.0
+  * Add B/D to python-click-plugins
+  * Update my mailaddress
+  * Set section for rasterio
+
+ -- Johan Van de Wauw <johan@vandewauw.be>  Fri, 25 Sep 2015 12:14:57 +0200
+
+rasterio (0.25.0-1) unstable; urgency=medium
+
+  * Fix tests on i386 (Closes:  #790549)
+  * Imported Upstream version 0.25.0
+  * Fix patches, drop patches included upstream
+  * Skip failing tests during build
+  * Update copyright with AUTHORS.txt
+
+ -- Johan Van de Wauw <johan.vandewauw@gmail.com>  Sun, 23 Aug 2015 21:34:03 +0200
+
+rasterio (0.24.0-1) unstable; urgency=medium
+
+  * Imported Upstream version 0.24.0
+  * Add extra dependency to python-snuggs
+  * Dependency on click via cligj
+  * Rename-rio-to-rasterio (Closes:#788463)
+  * Fix compatibility w/Cython 0.22(Closes: #788408)
+  * Add _io.pyx changes to Cython patch
+  * Also fix manpage installscript rio --> rasterio
+  * Update manfile
+  * Fix compatibility with numpy < 1.9
+  * Bump copyright year/add myself for packaging copyright
+
+ -- Johan Van de Wauw <johan.vandewauw@gmail.com>  Tue, 30 Jun 2015 00:11:40 +0200
+
+rasterio (0.15.1-1) unstable; urgency=medium
+
+  * Initial upload (closes: #767027)
+
+ -- Johan Van de Wauw <johan.vandewauw@gmail.com>  Thu, 25 Sep 2014 21:32:43 +0200

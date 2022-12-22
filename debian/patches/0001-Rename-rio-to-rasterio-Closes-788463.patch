@@ -1,0 +1,20 @@
+From: Johan Van de Wauw <johan.vandewauw@gmail.com>
+Date: Fri, 12 Jun 2015 19:28:19 +0200
+Subject: Rename rio to rasterio (Closes: #788463)
+
+There is already another package providing a binary "rio".
+---
+ setup.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/setup.py
++++ b/setup.py
+@@ -391,7 +391,7 @@ setup_args = dict(
+     packages=["rasterio", "rasterio.rio"],
+     entry_points="""
+         [console_scripts]
+-        rio=rasterio.rio.main:main_group
++        rasterio=rasterio.rio.main:main_group
+ 
+         [rasterio.rio_commands]
+         blocks=rasterio.rio.blocks:blocks
