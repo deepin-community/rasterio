@@ -1,5 +1,3 @@
-# cython: language_level=3
-
 include "gdal.pxi"
 
 cimport numpy as np
@@ -23,20 +21,13 @@ cdef class BufferedDatasetWriterBase(DatasetWriterBase):
     pass
 
 
-cdef class InMemoryRaster:
-    cdef GDALDatasetH _hds
-    cdef double gdal_transform[6]
-    cdef int* band_ids
-    cdef np.ndarray _image
-    cdef object crs
-    cdef object transform  # this is an Affine object.
-
-    cdef GDALDatasetH handle(self) except NULL
-    cdef GDALRasterBandH band(self, int) except NULL
+cdef class MemoryDataset(DatasetWriterBase):
+    cdef np.ndarray _array
 
 
 cdef class MemoryFileBase:
     cdef VSILFILE * _vsif
+    cdef public object _env
 
 
 ctypedef np.uint8_t DTYPE_UBYTE_t
@@ -51,3 +42,5 @@ ctypedef np.float64_t DTYPE_FLOAT64_t
 cdef bint in_dtype_range(value, dtype)
 
 cdef int io_auto(image, GDALRasterBandH band, bint write, int resampling=*) except -1
+cdef int io_band(GDALRasterBandH band, int mode, double x0, double y0, double width, double height, object data, int resampling=*) except -1
+cdef int io_multi_band(GDALDatasetH hds, int mode, double x0, double y0, double width, double height, object data, Py_ssize_t[:] indexes, int resampling=*) except -1

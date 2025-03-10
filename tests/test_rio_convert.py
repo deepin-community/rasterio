@@ -15,7 +15,8 @@ def test_tiled(tmpdir, runner):
     )
     assert result.exit_code == 0
     with rasterio.open(outputname) as src:
-        assert not src.is_tiled
+        blockysize, blockxsize = src.block_shapes[0]
+        assert blockxsize == src.width
 
 
 def test_format(tmpdir, runner):
@@ -46,7 +47,7 @@ def test_format_short(tmpdir, runner):
     ('jpeg', 'JPEG'),
 ])
 def test_autodetect_format(tmpdir, runner, extension, driver):
-    outputname = str(tmpdir.join("test.{}".format(extension)))
+    outputname = str(tmpdir.join(f"test.{extension}"))
     result = runner.invoke(
         main_group,
         ['convert', 'tests/data/RGB.byte.tif', outputname])

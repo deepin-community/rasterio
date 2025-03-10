@@ -24,8 +24,8 @@ these are exponents of 2
     >>> factors = [2, 4, 8, 16]
 
 To control the visual quality of the overviews, the 'nearest', 'cubic',
-'average', 'mode', and 'gauss' resampling alogrithms are available. These are
-available through the ``Resampling`` enum
+'average', 'mode', and 'gauss' resampling algorithms are available. These are
+available through the :class:`.Resampling` enum
 
 .. code-block:: python
 

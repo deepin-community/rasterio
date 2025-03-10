@@ -5,7 +5,6 @@ from unittest import mock
 from affine import Affine
 import numpy as np
 import pytest
-import shapely.geometry
 
 import rasterio
 from rasterio.enums import MergeAlg
@@ -14,8 +13,9 @@ from rasterio.features import (
     bounds, geometry_mask, geometry_window, is_valid_geom, rasterize, sieve,
     shapes)
 
-from .conftest import MockGeoInterface
-
+from .conftest import (
+    MockGeoInterface, gdal_version, requires_gdal_lt_37, requires_gdal37
+)
 
 DEFAULT_SHAPE = (10, 10)
 
@@ -123,16 +123,20 @@ def test_geometry_mask_invert(basic_geometry, basic_image_2x2):
     )
 
 
-@pytest.mark.parametrize("geom", [{'type': 'Invalid'}, {'type': 'Point'}, {'type': 'Point', 'coordinates': []}])
+@pytest.mark.parametrize(
+    "geom",
+    [{"type": "Invalid"}, {"type": "Point"}, {"type": "Point", "coordinates": []}],
+)
 def test_geometry_invalid_geom(geom):
     """An invalid geometry should fail"""
-    with pytest.raises(ValueError) as exc_info, pytest.warns(ShapeSkipWarning):
-        geometry_mask(
+    with pytest.warns(ShapeSkipWarning):
+        mask = geometry_mask(
             [geom],
             out_shape=DEFAULT_SHAPE,
             transform=Affine.identity())
 
-    assert 'No valid geometry objects found for rasterize' in exc_info.value.args[0]
+    assert mask.shape == DEFAULT_SHAPE
+    assert np.all(mask == True)
 
 
 def test_geometry_mask_invalid_shape(basic_geometry):
@@ -421,14 +425,82 @@ def test_rasterize_point(geojson_point):
     )
 
 
+def test_rasterize_to_dataset(tmp_path, geojson_point):
+    expected = np.zeros(shape=DEFAULT_SHAPE, dtype="uint8")
+    expected[2, 2] = 1
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=10,
+        height=10,
+        dtype="uint8",
+        crs="EPSG:4326",
+        transform=Affine.translation(0.0, 0.0) * Affine.scale(1.0, 1.0),
+    ) as dst:
+        rasterize([geojson_point], dst_path=dst)
+
+    with rasterio.open(tmp_path / "test.tif") as dst:
+        result = dst.read(indexes=1)
+
+    assert np.array_equal(result, expected)
+
+
+def test_rasterize_to_file(tmp_path, geojson_point):
+    expected = np.zeros(shape=DEFAULT_SHAPE, dtype="uint8")
+    expected[2, 2] = 1
+    expected = np.ma.masked_equal(expected, 0)
+
+    dst_kwds = dict(
+        driver="GTiff",
+        count=1,
+        width=10,
+        height=10,
+        dtype="uint8",
+        crs="EPSG:4326",
+        transform=Affine.translation(0.0, 0.0) * Affine.scale(1.0, 1.0),
+    )
+    rasterize(
+        [geojson_point], nodata=0.0, dst_path=(tmp_path / "test.tif"), dst_kwds=dst_kwds
+    )
+
+    with rasterio.open(tmp_path / "test.tif") as dst:
+        result = dst.read(indexes=1, masked=True)
+
+    assert np.array_equal(result, expected)
+
+
+def test_rasterize_point_dtype_int(geojson_point):
+    """Demonstrate fix of #3043."""
+    expected = np.zeros(shape=DEFAULT_SHAPE, dtype=int)
+    expected[2, 2] = 1
+
+    assert np.array_equal(
+        rasterize([geojson_point], out_shape=DEFAULT_SHAPE),
+        expected
+    )
+
+
 def test_rasterize_multipoint(geojson_multipoint):
     expected = np.zeros(shape=DEFAULT_SHAPE, dtype='uint8')
     expected[2, 2] = 1
     expected[4, 4] = 1
 
     assert np.array_equal(
-        rasterize([geojson_multipoint], out_shape=DEFAULT_SHAPE),
-        expected
+        rasterize([geojson_multipoint], out_shape=DEFAULT_SHAPE), expected
+    )
+
+
+def test_rasterize_multipoint_masked(geojson_multipoint):
+    expected = np.zeros(shape=DEFAULT_SHAPE, dtype="uint8")
+    expected[2, 2] = 1
+    expected[4, 4] = 1
+    expected = np.ma.masked_equal(expected, 0)
+
+    assert np.array_equal(
+        rasterize([geojson_multipoint], out_shape=DEFAULT_SHAPE, masked=True), expected
     )
 
 
@@ -496,7 +568,7 @@ def test_rasterize_geo_interface(geojson_polygon, basic_image_2x2):
 def test_rasterize_geomcollection_no_hole():
     """
     Make sure that bug reported in
-    https://github.com/mapbox/rasterio/issues/1253
+    https://github.com/rasterio/rasterio/issues/1253
     does not recur.  GeometryCollections are flattened to individual parts,
     and should result in no holes where parts overlap.
     """
@@ -519,7 +591,7 @@ def test_rasterize_geomcollection_no_hole():
 def test_rasterize_multipolygon_no_hole():
     """
     Make sure that bug reported in
-    https://github.com/mapbox/rasterio/issues/1253
+    https://github.com/rasterio/rasterio/issues/1253
     does not recur.  MultiPolygons are flattened to individual parts,
     and should result in no holes where parts overlap.
     """
@@ -540,20 +612,32 @@ def test_rasterize_multipolygon_no_hole():
     )
 
 
-@pytest.mark.parametrize("input", [
-    [{'type'}], [{'type': 'Invalid'}], [{'type': 'Point'}], [{'type': 'Point', 'coordinates': []}], [{'type': 'GeometryCollection', 'geometries': []}]])
+@pytest.mark.parametrize(
+    "input",
+    [
+        [{"type"}],
+        [{"type": "Invalid"}],
+        [{"type": "Point"}],
+        [{"type": "Point", "coordinates": []}],
+        [{"type": "GeometryCollection", "geometries": []}],
+    ],
+)
 def test_rasterize_invalid_geom(input):
-    """Invalid GeoJSON should fail with exception"""
-    with pytest.raises(ValueError), pytest.warns(ShapeSkipWarning):
-        rasterize(input, out_shape=DEFAULT_SHAPE)
+    """Invalid GeoJSON should be skipped with a warning."""
+    with pytest.warns(ShapeSkipWarning):
+        out = rasterize(input, out_shape=DEFAULT_SHAPE)
+
+    assert out.shape == DEFAULT_SHAPE
+    assert np.all(out == 0)
 
 
-def test_rasterize_skip_invalid_geom(geojson_polygon, basic_image_2x2):
-    """Rasterize operation should succeed for at least one valid geometry
-    and should skip any invalid or empty geometries with an error."""
-
-    with pytest.warns(UserWarning, match="Invalid or empty shape"):
-        out = rasterize([geojson_polygon, {'type': 'Polygon', 'coordinates': []}], out_shape=DEFAULT_SHAPE)
+def test_rasterize_skip_only_invalid_geom(geojson_polygon, basic_image_2x2):
+    """Rasterize operation should succeed for at least one valid geometry."""
+    with pytest.warns(ShapeSkipWarning, match="Invalid or empty shape"):
+        out = rasterize(
+            [geojson_polygon, {"type": "Polygon", "coordinates": []}],
+            out_shape=DEFAULT_SHAPE,
+        )
 
     assert np.array_equal(out, basic_image_2x2)
 
@@ -565,13 +649,14 @@ def test_rasterize_out_image(basic_geometry, basic_image_2x2):
     assert np.array_equal(basic_image_2x2, out)
 
 
-def test_rasterize_invalid_out_dtype(basic_geometry):
+def test_rasterize_unsupported_dtype(basic_geometry):
     """A non-supported data type for out should raise an exception."""
-    out = np.zeros(DEFAULT_SHAPE, dtype=np.int64)
+    out = np.zeros(DEFAULT_SHAPE, dtype=np.float16)
     with pytest.raises(ValueError):
         rasterize([basic_geometry], out=out)
 
 
+@pytest.mark.xfail(reason="shape values are always unsafely cast to the given dtype.")
 def test_rasterize_shapes_out_dtype_mismatch(basic_geometry):
     """Shape values must be able to fit in data type for out."""
     out = np.zeros(DEFAULT_SHAPE, dtype=np.uint8)
@@ -586,35 +671,40 @@ def test_rasterize_missing_out(basic_geometry):
 
 
 def test_rasterize_missing_shapes():
-    """Shapes are required for this operation."""
-    with pytest.raises(ValueError) as ex:
-        rasterize([], out_shape=DEFAULT_SHAPE)
+    """Shapes are not required for this operation."""
+    out = rasterize([], out_shape=DEFAULT_SHAPE)
+    assert out.shape == DEFAULT_SHAPE
+    assert np.all(out == 0)
 
-    assert 'No valid geometry objects' in str(ex.value)
 
-
-def test_rasterize_invalid_shapes():
-    """Invalid shapes should raise an exception rather than be skipped."""
-    with pytest.raises(ValueError) as ex, pytest.warns(ShapeSkipWarning):
+def test_rasterize_invalid_shapes_skip():
+    """Invalid shapes can be skipped with a warning, the default."""
+    with pytest.warns(ShapeSkipWarning):
         rasterize([{'foo': 'bar'}], out_shape=DEFAULT_SHAPE)
 
-    assert 'No valid geometry objects found for rasterize' in str(ex.value)
+
+def test_rasterize_invalid_shapes_no_skip():
+    """Invalid shapes can raise an exception rather than be skipped."""
+    with pytest.raises(ValueError):
+        rasterize([{'foo': 'bar'}], out_shape=DEFAULT_SHAPE, skip_invalid=False)
 
 
-def test_rasterize_invalid_out_shape(basic_geometry):
+@pytest.mark.parametrize("shape", [(1, 10, 10), (10,)])
+def test_rasterize_invalid_out_shape(basic_geometry, shape):
     """output array shape must be 2D."""
-    with pytest.raises(ValueError) as ex:
-        rasterize([basic_geometry], out_shape=(1, 10, 10))
-    assert 'Invalid out_shape' in str(ex.value)
+    with pytest.raises(ValueError, match="Invalid out_shape"):
+        rasterize([basic_geometry], out_shape=shape)
 
     with pytest.raises(ValueError) as ex:
         rasterize([basic_geometry], out_shape=(10,))
     assert 'Invalid out_shape' in str(ex.value)
 
-    for shape in [(0, 0), (1, 0), (0, 1)]:
-        with pytest.raises(ValueError) as ex:
-            rasterize([basic_geometry], out_shape=shape)
-        assert 'must be > 0' in str(ex.value)
+
+@pytest.mark.parametrize("shape", [(0, 0), (1, 0), (0, 1)])
+def test_rasterize_invalid_out_extent(basic_geometry, shape):
+    """output array shape must have nonzero extent."""
+    with pytest.raises(ValueError, match="must be > 0"):
+        rasterize([basic_geometry], out_shape=shape)
 
 
 def test_rasterize_default_value(basic_geometry, basic_image_2x2):
@@ -638,13 +728,9 @@ def test_rasterize_default_value_for_none(basic_geometry, basic_image_2x2):
     )
 
 
-def test_rasterize_invalid_default_value(basic_geometry):
-    """A default value that requires an int64 should raise an exception."""
-    with pytest.raises(ValueError):
-        rasterize(
-            [basic_geometry], out_shape=DEFAULT_SHAPE,
-            default_value=1000000000000
-        )
+def test_rasterize_int64_default_value(basic_geometry):
+    """A default value that requires an int64 succeeds for GDAL >= 3.5."""
+    rasterize([basic_geometry], out_shape=DEFAULT_SHAPE, default_value=1000000000000)
 
 
 def test_rasterize_fill_value(basic_geometry, basic_image_2x2):
@@ -660,21 +746,11 @@ def test_rasterize_fill_value(basic_geometry, basic_image_2x2):
 
 
 def test_rasterize_invalid_fill_value(basic_geometry):
-    """A fill value that requires an int64 should raise an exception."""
-    with pytest.raises(ValueError):
-        rasterize(
-            [basic_geometry], out_shape=DEFAULT_SHAPE, fill=1000000000000,
-            default_value=2
-        )
-
-
-def test_rasterize_fill_value_dtype_mismatch(basic_geometry):
-    """A fill value that doesn't match dtype should fail."""
-    with pytest.raises(ValueError):
-        rasterize(
-            [basic_geometry], out_shape=DEFAULT_SHAPE, fill=1000000,
-            default_value=2, dtype=np.uint8
-        )
+    """Fill arg no longer determines data type."""
+    out = rasterize(
+        [basic_geometry], out_shape=DEFAULT_SHAPE, fill=0.5, default_value=2
+    )
+    assert out.dtype.kind != "f"
 
 
 def test_rasterize_all_touched(basic_geometry, basic_image):
@@ -714,95 +790,22 @@ def test_rasterize_value(basic_geometry, basic_image_2x2):
     )
 
 
-def test_rasterize_invalid_value(basic_geometry):
-    """A shape value that requires an int64 should raise an exception."""
-    with pytest.raises(ValueError) as ex:
-        rasterize(
-            [(basic_geometry, 1000000000000)], out_shape=DEFAULT_SHAPE
-        )
-
-    assert 'dtype must be one of' in str(ex.value)
-
-
-def test_rasterize_supported_dtype(basic_geometry):
-    """Supported data types should return valid results."""
-    supported_types = (
-        ('int16', -32768),
-        ('int32', -2147483648),
-        ('uint8', 255),
-        ('uint16', 65535),
-        ('uint32', 4294967295),
-        ('float32', 1.434532),
-        ('float64', -98332.133422114)
-    )
-
-    for dtype, default_value in supported_types:
-        truth = np.zeros(DEFAULT_SHAPE, dtype=dtype)
-        truth[2:4, 2:4] = default_value
-
-        result = rasterize(
-            [basic_geometry],
-            out_shape=DEFAULT_SHAPE,
-            default_value=default_value,
-            dtype=dtype
-        )
-        assert np.array_equal(result, truth)
-        assert np.dtype(result.dtype) == np.dtype(truth.dtype)
-
-        result = rasterize(
-            [(basic_geometry, default_value)],
-            out_shape=DEFAULT_SHAPE
-        )
-        if np.dtype(dtype).kind == 'f':
-            assert np.allclose(result, truth)
-        else:
-            assert np.array_equal(result, truth)
-        # Since dtype is auto-detected, it may not match due to upcasting
-
-
-def test_rasterize_unsupported_dtype(basic_geometry):
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        "float16",
+        pytest.param(
+            "int8",
+            marks=pytest.mark.skipif(
+                gdal_version.at_least("3.7"), reason="int8 supported at GDAL 3.7"
+            ),
+        ),
+    ],
+)
+def test_rasterize_unsupported_dtype(basic_geometry, dtype):
     """Unsupported types should all raise exceptions."""
-    unsupported_types = (
-        ('int8', -127),
-        ('int64', 20439845334323),
-        ('float16', -9343.232)
-    )
-
-    for dtype, default_value in unsupported_types:
-        with pytest.raises(ValueError):
-            rasterize(
-                [basic_geometry],
-                out_shape=DEFAULT_SHAPE,
-                default_value=default_value,
-                dtype=dtype
-            )
-
-        with pytest.raises(ValueError):
-            rasterize(
-                [(basic_geometry, default_value)],
-                out_shape=DEFAULT_SHAPE,
-                dtype=dtype
-            )
-
-
-def test_rasterize_mismatched_dtype(basic_geometry):
-    """Mismatched values and dtypes should raise exceptions."""
-    mismatched_types = (('uint8', 3.2423), ('uint8', -2147483648))
-    for dtype, default_value in mismatched_types:
-        with pytest.raises(ValueError):
-            rasterize(
-                [basic_geometry],
-                out_shape=DEFAULT_SHAPE,
-                default_value=default_value,
-                dtype=dtype
-            )
-
-        with pytest.raises(ValueError):
-            rasterize(
-                [(basic_geometry, default_value)],
-                out_shape=DEFAULT_SHAPE,
-                dtype=dtype
-            )
+    with pytest.raises(ValueError):
+        rasterize([basic_geometry], out_shape=DEFAULT_SHAPE, dtype=dtype)
 
 
 def test_rasterize_geometries_symmetric():
@@ -831,9 +834,75 @@ def test_rasterize_geo_interface_2(geojson_polygon):
     assert rasterize([GeoObj()], out_shape=DEFAULT_SHAPE).sum() == 4
 
 
+def test_rasterize__numpy_coordinates__fail():
+    # https://github.com/rasterio/rasterio/issues/2385
+    shapes = [
+        (
+            {
+                "type": "LineString",
+                "coordinates": np.array(
+                    [
+                        [425596.0123443, 4932971.35636043],
+                        [425598.03434254, 4932966.09916503],
+                        [425592.56573176, 4932963.99585319],
+                        [425590.54373353, 4932969.2530486],
+                        [425596.0123443, 4932971.35636043],
+                    ]
+                ),
+            },
+            2,
+        ),
+        (
+            {
+                "type": "LineString",
+                "coordinates": np.array(
+                    [
+                        [425582.9243515, 4932973.24623693],
+                        [425592.85588065, 4932951.94800393],
+                        [425584.24595668, 4932947.93313045],
+                        [425574.31442752, 4932969.23136344],
+                        [425582.9243515, 4932973.24623693],
+                    ]
+                ),
+            },
+            2,
+        ),
+    ]
+    out = rasterio.features.rasterize(shapes=shapes, out_shape=(100, 100))
+    assert out.shape == (100, 100)
+    # will fail and be filled with 0
+    assert (out == 0).all()
+
+
 def test_shapes(basic_image):
     """Test creation of shapes from pixel values."""
+    shapely = pytest.importorskip("shapely", reason="Test requires shapely.")
     results = list(shapes(basic_image))
+
+    assert len(results) == 2
+
+    shape, value = results[0]
+    assert shape == {
+        'coordinates': [
+            [(2, 2), (2, 5), (5, 5), (5, 2), (2, 2)]
+        ],
+        'type': 'Polygon'
+    }
+    assert value == 1
+
+    shape, value = results[1]
+    assert shapely.geometry.shape(shape).area == 91.0
+    assert value == 0
+
+
+def test_shapes_2509(basic_image):
+    """Test creation of shapes from pixel values, issue #2509."""
+    shapely = pytest.importorskip("shapely", reason="Test requires shapely.")
+    image_with_strides = np.pad(basic_image, 1)[1:-1, 1:-1]
+    np.testing.assert_array_equal(basic_image, image_with_strides)
+    assert image_with_strides.__array_interface__["strides"] is not None
+
+    results = list(shapes(image_with_strides))
 
     assert len(results) == 2
 
@@ -956,34 +1025,37 @@ def test_shapes_invalid_mask_dtype(basic_image):
             ))
 
 
-def test_shapes_supported_dtypes(basic_image):
+@pytest.mark.parametrize(
+    "dtype, test_value",
+    [
+        pytest.param("int8", -127, marks=requires_gdal37),
+        ("int16", -32768),
+        ("int32", -2147483648),
+        ("uint8", 255),
+        ("uint16", 65535),
+        ("float32", 1.434532),
+        ("float64", 1.434532),
+    ],
+)
+def test_shapes_supported_dtypes(basic_image, dtype, test_value):
     """Supported data types should return valid results."""
-    supported_types = (
-        ('int16', -32768),
-        ('int32', -2147483648),
-        ('uint8', 255),
-        ('uint16', 65535),
-        ('float32', 1.434532)
-    )
-
-    for dtype, test_value in supported_types:
-        shape, value = next(shapes(basic_image.astype(dtype) * test_value))
-        assert np.allclose(value, test_value)
+    shape, value = next(shapes(basic_image.astype(dtype) * test_value))
+    assert np.allclose(value, test_value)
 
 
-def test_shapes_unsupported_dtypes(basic_image):
+@pytest.mark.parametrize(
+    "dtype, test_value",
+    [
+        pytest.param("int8", -127, marks=requires_gdal_lt_37),
+        ("uint32", 4294967295),
+        ("int64", 20439845334323),
+        ("float16", -9343.232),
+    ],
+)
+def test_shapes_unsupported_dtypes(basic_image, dtype, test_value):
     """Unsupported data types should raise exceptions."""
-    unsupported_types = (
-        ('int8', -127),
-        ('uint32', 4294967295),
-        ('int64', 20439845334323),
-        ('float16', -9343.232),
-        ('float64', -98332.133422114)
-    )
-
-    for dtype, test_value in unsupported_types:
-        with pytest.raises(ValueError):
-            next(shapes(basic_image.astype(dtype) * test_value))
+    with pytest.raises(ValueError):
+        next(shapes(basic_image.astype(dtype) * test_value))
 
 
 def test_shapes_internal_driver_manager(basic_image):
@@ -1094,6 +1166,18 @@ def test_sieve_blank_mask(basic_image):
     )
 
 
+@pytest.mark.xfail(reason="Upstream bug in GDAL, see #3074.")
+def test_sieve_all_masked(basic_image):
+    """A blank mask should have no effect."""
+    mask = np.full(basic_image.shape, False)
+    # mask[-1, -1] = True
+    sieved = sieve(basic_image, basic_image.sum(), mask=mask)
+    assert np.array_equal(
+        basic_image,
+        sieved
+    )
+
+
 def test_sieve_invalid_mask_shape(basic_image):
     """A mask that is the wrong shape should fail."""
     with pytest.raises(ValueError):
@@ -1180,3 +1264,31 @@ def test_zz_no_dataset_leaks(capfd):
         env._dump_open_datasets()
         captured = capfd.readouterr()
         assert not captured.err
+
+
+def test_sieve_bands(pixelated_image, pixelated_image_file):
+    """Verify fix for gh-2782."""
+    truth = sieve(pixelated_image, 9)
+
+    with rasterio.open(pixelated_image_file) as src:
+        assert np.array_equal(truth, sieve(rasterio.band(src, [1]), 9))
+
+        # Mask band should also work but will be a no-op
+        assert np.array_equal(
+            pixelated_image,
+            sieve(rasterio.band(src, [1]), 9, mask=rasterio.band(src, 1))
+        )
+
+
+def test_sieve_dataset(pixelated_image, pixelated_image_file):
+    """Verify fix for gh-2782."""
+    truth = sieve(pixelated_image, 9)
+
+    with rasterio.open(pixelated_image_file) as src:
+        assert np.array_equal(truth, sieve(src, 9))
+
+        # Mask band should also work but will be a no-op
+        assert np.array_equal(
+            pixelated_image,
+            sieve(src, 9, mask=rasterio.band(src, 1))
+        )

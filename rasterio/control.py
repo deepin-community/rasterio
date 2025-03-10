@@ -3,7 +3,7 @@
 import uuid
 
 
-class GroundControlPoint(object):
+class GroundControlPoint:
     """A mapping of row, col image coordinates to x, y, z."""
 
     def __init__(self, row=None, col=None, x=None, y=None, z=None,
@@ -21,7 +21,7 @@ class GroundControlPoint(object):
         z : float, optional
             Optional ``z`` coordinate.
         id : str, optional
-            A unique identifer for the ground control point.
+            A unique identifier for the ground control point.
         info : str, optional
             A short description for the ground control point.
         """
@@ -38,10 +38,14 @@ class GroundControlPoint(object):
         self.z = z
 
     def __repr__(self):
-        args = ', '.join(['{}={}'.format(att, repr(getattr(self, att)))
-                         for att in ('row', 'col', 'x', 'y', 'z', 'id', 'info')
-                         if getattr(self, att) is not None])
-        return "GroundControlPoint({})".format(args)
+        args = ", ".join(
+            [
+                f"{att}={repr(getattr(self, att))}"
+                for att in ("row", "col", "x", "y", "z", "id", "info")
+                if getattr(self, att) is not None
+            ]
+        )
+        return f"GroundControlPoint({args})"
 
     def asdict(self):
         """A dict representation of the GCP"""

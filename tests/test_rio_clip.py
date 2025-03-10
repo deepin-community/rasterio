@@ -5,11 +5,32 @@ import pytest
 
 import rasterio
 from rasterio.rio.main import main_group
+from rasterio import windows
 TEST_BBOX = [-11850000, 4804000, -11840000, 4808000]
 
 
 def bbox(*args):
     return ' '.join([str(x) for x in args])
+
+
+def test_clip(runner, tmpdir):
+    output = str(tmpdir.join('test.tif'))
+
+    with rasterio.open("tests/data/shade.tif") as src:
+        # make sure width and height are > chunksize for clip (512)
+        test_window = windows.Window(50, 80, 715, 830)
+        test_bounds = windows.bounds(test_window, src.transform)
+        src_data = src.read(window=test_window)
+
+    result = runner.invoke(
+        main_group, ["clip", "tests/data/shade.tif", output, "--bounds", bbox(*test_bounds)]
+    )
+    assert result.exit_code == 0
+    assert os.path.exists(output)
+
+    with rasterio.open(output) as out:
+        data = out.read()
+        assert numpy.allclose(data, src_data)
 
 
 @pytest.mark.parametrize("bounds", [bbox(*TEST_BBOX)])
@@ -61,6 +82,31 @@ def test_clip_bounds_geographic(runner, tmpdir):
         assert out.shape == (718, 791)
 
 
+def test_clip_to_datawindow(runner, tmpdir):
+    output = str(
+        tmpdir.join(
+            "test.tif",
+        )
+    )
+    result = runner.invoke(
+        main_group,
+        [
+            "clip",
+            "tests/data/float_raster_with_extra_nodata.tif",
+            output,
+            "--to-data-window",
+        ],
+    )
+    assert result.exit_code == 0
+    assert os.path.exists(
+        output,
+    )
+
+    # could also check that it is equal to tests/data/float_raster_with_nodata.tif
+    with rasterio.open(output) as out:
+        assert out.shape == (12, 13)
+
+
 def test_clip_like(runner, tmpdir):
     output = str(tmpdir.join('test.tif'))
     result = runner.invoke(
@@ -81,7 +127,7 @@ def test_clip_missing_params(runner, tmpdir):
     result = runner.invoke(
         main_group, ['clip', 'tests/data/shade.tif', output])
     assert result.exit_code == 2
-    assert '--bounds or --like required' in result.output
+    assert "-bounds, --like, or --to-data-window required" in result.output
 
 
 def test_clip_bounds_disjunct(runner, tmpdir):

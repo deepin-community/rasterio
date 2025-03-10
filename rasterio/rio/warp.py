@@ -1,5 +1,6 @@
-"""$ rio warp"""
+"""rio warp: CLI for reprojecting rasters."""
 
+import json
 import logging
 from math import ceil, floor
 import sys
@@ -12,18 +13,13 @@ from rasterio.env import setenv
 from rasterio.errors import CRSError
 from rasterio.rio import options
 from rasterio.rio.helpers import resolve_inout
+from rasterio.rio.options import _cb_key_val
 from rasterio.transform import Affine
 from rasterio.warp import (
     reproject, Resampling, SUPPORTED_RESAMPLING, transform_bounds,
     aligned_target, calculate_default_transform as calcdt)
 
 logger = logging.getLogger(__name__)
-
-# Improper usage of rio-warp can lead to accidental creation of
-# extremely large datasets. We'll put a hard limit on the size of
-# datasets and raise a usage error if the limits are exceeded.
-MAX_OUTPUT_WIDTH = 100000
-MAX_OUTPUT_HEIGHT = 100000
 
 
 @click.command(short_help='Warp a raster dataset.')
@@ -47,27 +43,79 @@ MAX_OUTPUT_HEIGHT = 100000
     '--bounds', '--dst-bounds', 'dst_bounds', nargs=4, type=float, default=None,
     help="Determine output extent from destination bounds: left bottom right top")
 @options.resolution_opt
-@click.option('--resampling',
-              type=click.Choice([r.name for r in SUPPORTED_RESAMPLING]),
-              default='nearest', help="Resampling method.",
-              show_default=True)
-@click.option('--src-nodata', default=None, show_default=True,
-              type=float, help="Manually override source nodata")
-@click.option('--dst-nodata', default=None, show_default=True,
-              type=float, help="Manually override destination nodata")
-@click.option('--threads', type=int, default=1,
-              help='Number of processing threads.')
-@click.option('--check-invert-proj/--no-check-invert-proj', default=True,
-              help='Constrain output to valid coordinate region in dst-crs')
-@click.option('--target-aligned-pixels/--no-target-aligned-pixels', default=False,
-              help='align the output bounds based on the resolution')
+@click.option(
+    "--resampling",
+    type=click.Choice([r.name for r in SUPPORTED_RESAMPLING]),
+    default="nearest",
+    help="Resampling method.",
+    show_default=True,
+)
+@click.option(
+    "--src-nodata",
+    default=None,
+    show_default=True,
+    type=float,
+    help="Manually override source nodata",
+)
+@click.option(
+    "--dst-nodata",
+    default=None,
+    show_default=True,
+    type=float,
+    help="Manually override destination nodata",
+)
+@click.option("--threads", type=int, default=1, help="Number of processing threads.")
+@click.option(
+    "--check-invert-proj/--no-check-invert-proj",
+    default=True,
+    help="Constrain output to valid coordinate region in dst-crs",
+)
+@click.option(
+    "--target-aligned-pixels/--no-target-aligned-pixels",
+    default=False,
+    help="align the output bounds based on the resolution",
+)
 @options.overwrite_opt
 @options.creation_options
+@click.option(
+    "--to",
+    "--wo",
+    "--transformer-option",
+    "--warper-option",
+    "warper_options",
+    metavar="NAME=VALUE",
+    multiple=True,
+    callback=_cb_key_val,
+    help="GDAL warper and coordinate transformer options.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Do not create an output file, but report on its expected size and other characteristics.",
+)
 @click.pass_context
-def warp(ctx, files, output, driver, like, dst_crs, dimensions, src_bounds,
-         dst_bounds, res, resampling, src_nodata, dst_nodata, threads,
-         check_invert_proj, overwrite, creation_options,
-         target_aligned_pixels):
+def warp(
+    ctx,
+    files,
+    output,
+    driver,
+    like,
+    dst_crs,
+    dimensions,
+    src_bounds,
+    dst_bounds,
+    res,
+    resampling,
+    src_nodata,
+    dst_nodata,
+    threads,
+    check_invert_proj,
+    overwrite,
+    creation_options,
+    target_aligned_pixels,
+    warper_options,
+    dry_run,
+):
     """
     Warp a raster dataset.
 
@@ -80,23 +128,19 @@ def warp(ctx, files, output, driver, like, dst_crs, dimensions, src_bounds,
     \b
         $ rio warp input.tif output.tif --like template.tif
 
-    The output coordinate reference system may be either a PROJ.4 or
-    EPSG:nnnn string,
+    The destination's coordinate reference system may be an authority
+    name, PROJ4 string, JSON-encoded PROJ4, or WKT.
 
     \b
         --dst-crs EPSG:4326
         --dst-crs '+proj=longlat +ellps=WGS84 +datum=WGS84'
-
-    or a JSON text-encoded PROJ.4 object.
-
-    \b
         --dst-crs '{"proj": "utm", "zone": 18, ...}'
 
-    If --dimensions are provided, --res and --bounds are not applicable and an
-    exception will be raised.
-    Resolution is calculated based on the relationship between the
-    raster bounds in the target coordinate system and the dimensions,
-    and may produce rectangular rather than square pixels.
+    If --dimensions are provided, --res and --bounds are not applicable
+    and an exception will be raised.  Resolution is calculated based on
+    the relationship between the raster bounds in the target coordinate
+    system and the dimensions, and may produce rectangular rather than
+    square pixels.
 
     \b
         $ rio warp input.tif output.tif --dimensions 100 200 \\
@@ -126,10 +170,6 @@ def warp(ctx, files, output, driver, like, dst_crs, dimensions, src_bounds,
         if not res:
             raise click.BadParameter(
                 '--target-aligned-pixels requires a specified resolution')
-        if src_bounds or dst_bounds:
-            raise click.BadParameter(
-                '--target-aligned-pixels cannot be used with '
-                '--src-bounds or --dst-bounds')
 
     # Check invalid parameter combinations
     if like:
@@ -224,8 +264,14 @@ def warp(ctx, files, output, driver, like, dst_crs, dimensions, src_bounds,
                             src_crs = src.crs
                             kwargs = src.bounds._asdict()
                         dst_transform, dst_width, dst_height = calcdt(
-                            src_crs, dst_crs, src.width, src.height,
-                            resolution=res, **kwargs)
+                            src_crs,
+                            dst_crs,
+                            src.width,
+                            src.height,
+                            resolution=res,
+                            **kwargs,
+                            **warper_options
+                        )
                     except CRSError as err:
                         raise click.BadParameter(
                             str(err), param='dst_crs', param_hint='dst_crs')
@@ -285,7 +331,9 @@ def warp(ctx, files, output, driver, like, dst_crs, dimensions, src_bounds,
                 dst_transform = Affine.translation(left, top) * Affine.scale(res, -res)
 
             if target_aligned_pixels:
-                dst_transform, dst_width, dst_height = aligned_target(dst_transform, dst_width, dst_height, res)
+                dst_transform, dst_width, dst_height = aligned_target(
+                    dst_transform, dst_width, dst_height, res
+                )
 
             # If src_nodata is not None, update the dst metadata NODATA
             # value to src_nodata (will be overridden by dst_nodata if it is not None
@@ -303,15 +351,6 @@ def warp(ctx, files, output, driver, like, dst_crs, dimensions, src_bounds,
                     # Update the dst nodata value
                     out_kwargs.update(nodata=dst_nodata)
 
-            # When the bounds option is misused, extreme values of
-            # destination width and height may result.
-            if (dst_width < 0 or dst_height < 0 or
-                    dst_width > MAX_OUTPUT_WIDTH or
-                    dst_height > MAX_OUTPUT_HEIGHT):
-                raise click.BadParameter(
-                    "Invalid output dimensions: {0}.".format(
-                        (dst_width, dst_height)))
-
             out_kwargs.update(
                 crs=dst_crs,
                 transform=dst_transform,
@@ -323,28 +362,41 @@ def warp(ctx, files, output, driver, like, dst_crs, dimensions, src_bounds,
             if "blockxsize" in out_kwargs and dst_width < int(out_kwargs["blockxsize"]):
                 del out_kwargs["blockxsize"]
                 logger.warning(
-                    "Blockxsize removed from creation options to accomodate small output width"
+                    "Blockxsize removed from creation options to accommodate small output width"
                 )
             if "blockysize" in out_kwargs and dst_height < int(
                 out_kwargs["blockysize"]
             ):
                 del out_kwargs["blockysize"]
                 logger.warning(
-                    "Blockxsize removed from creation options to accomodate small output height"
+                    "Blockxsize removed from creation options to accommodate small output height"
                 )
 
             out_kwargs.update(**creation_options)
 
-            with rasterio.open(output, 'w', **out_kwargs) as dst:
-                reproject(
-                    source=rasterio.band(src, list(range(1, src.count + 1))),
-                    destination=rasterio.band(
-                        dst, list(range(1, src.count + 1))),
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    src_nodata=src_nodata,
-                    dst_transform=out_kwargs['transform'],
-                    dst_crs=out_kwargs['crs'],
-                    dst_nodata=dst_nodata,
-                    resampling=resampling,
-                    num_threads=threads)
+            if dry_run:
+                crs = out_kwargs.get("crs", None)
+                if crs:
+                    epsg = src.crs.to_epsg()
+                    if epsg:
+                        out_kwargs["crs"] = f"EPSG:{epsg}"
+                    else:
+                        out_kwargs['crs'] = src.crs.to_string()
+
+                click.echo("Output dataset profile:")
+                click.echo(json.dumps(dict(**out_kwargs), indent=2))
+            else:
+                with rasterio.open(output, "w", **out_kwargs) as dst:
+                    reproject(
+                        source=rasterio.band(src, list(range(1, src.count + 1))),
+                        destination=rasterio.band(dst, list(range(1, src.count + 1))),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        src_nodata=src_nodata,
+                        dst_transform=out_kwargs["transform"],
+                        dst_crs=out_kwargs["crs"],
+                        dst_nodata=dst_nodata,
+                        resampling=resampling,
+                        num_threads=threads,
+                        **warper_options
+                    )

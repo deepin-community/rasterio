@@ -41,9 +41,8 @@ class FileOverwriteError(FileError):
         super().__init__('', hint=message)
 
 
-class RasterioIOError(IOError):
-    """Raised when a dataset cannot be opened using one of the
-    registered format drivers."""
+class RasterioIOError(RasterioError, OSError):
+    """Raised when a dataset cannot be opened or accessed."""
 
 
 class NodataShadowWarning(UserWarning):
@@ -59,8 +58,12 @@ class NotGeoreferencedWarning(UserWarning):
     """Warn that a dataset isn't georeferenced."""
 
 
-class RPCTransformWarning(UserWarning):
-    """Error raised when GDALRPCTransform fails."""
+class TransformWarning(UserWarning):
+    """Warn that coordinate transformations may behave unexpectedly"""
+
+
+class RPCError(ValueError):
+    """Raised when RPC transformation is invalid"""
 
 
 class ShapeSkipWarning(UserWarning):
@@ -72,6 +75,11 @@ class GDALBehaviorChangeException(RuntimeError):
     example, antimeridian cutting is always on as of GDAL 2.2.0.  Users
     expecting it to be off will be presented with a MultiPolygon when the
     rest of their code expects a Polygon.
+
+    Examples
+    --------
+
+    .. code-block:: python
 
         # Raises an exception on GDAL >= 2.2.0
         rasterio.warp.transform_geometry(
@@ -150,3 +158,19 @@ class DatasetIOShapeError(RasterioError):
 
 class WarpOperationError(RasterioError):
     """Raised when a warp operation fails."""
+
+
+class StatisticsError(RasterioError):
+    """Raised when dataset statistics cannot be computed."""
+
+
+class OpenerRegistrationError(RasterioError):
+    """Raised when a Python file opener can not be registered."""
+
+
+class MergeError(RasterioError):
+    """Raised when rasters cannot be merged."""
+
+
+class StackError(RasterioError):
+    """Raised when rasters cannot be stacked."""

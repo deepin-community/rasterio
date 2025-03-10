@@ -14,12 +14,12 @@ logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 @pytest.fixture(scope='function')
 def tempfile():
     """A temporary filename in the GDAL '/vsimem' filesystem"""
-    return '/vsimem/{}'.format(uuid.uuid4())
+    return f"/vsimem/{uuid.uuid4()}"
 
 
 def image(height, width, dtype):
     """An array with sequential elements"""
-    return np.array(range(height * width), dtype=dtype).reshape(height, width)
+    return np.arange(0, height*width, dtype=dtype).reshape(height, width)
 
 
 dtypes = ['uint8', 'uint16', 'int16', 'uint32', 'int32', 'float32', 'float64']

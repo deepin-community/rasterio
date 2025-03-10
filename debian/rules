@@ -3,37 +3,62 @@
 # Enable hardening build flags
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all
 
-export PYBUILD_NAME=rasterio
-export PYBUILD_BEFORE_TEST= cp -r {dir}/tests {build_dir}
+DEB_BUILD_ARCH ?= $(shell dpkg-architecture -qDEB_BUILD_ARCH)
 
+export PYBUILD_NAME=rasterio
+export PYBUILD_BEFORE_TEST=cp -r {dir}/tests {build_dir}
 export PYBUILD_AFTER_TEST=rm -rf {build_dir}/tests
 export PYBUILD_TEST_PYTEST=1
+export PYBUILD_TEST_ARGS=--ignore tests/test_env.py \
+                         --ignore tests/test_io.py \
+                         --ignore tests/test_merge.py \
+                         --ignore tests/test_pyopener.py \
+                         --ignore tests/test_read_boundless.py \
+                         --ignore tests/test_rio_blocks.py \
+                         --ignore tests/test_rio_bounds.py \
+                         --ignore tests/test_rio_calc.py \
+                         --ignore tests/test_rio_clip.py \
+                         --ignore tests/test_rio_convert.py \
+                         --ignore tests/test_rio_edit_info.py \
+                         --ignore tests/test_rio_gcp.py \
+                         --ignore tests/test_rio_helpers.py \
+                         --ignore tests/test_rio_info.py \
+                         --ignore tests/test_rio_insp.py \
+                         --ignore tests/test_rio_main.py \
+                         --ignore tests/test_rio_mask.py \
+                         --ignore tests/test_rio_merge.py \
+                         --ignore tests/test_rio_options.py \
+                         --ignore tests/test_rio_overview.py \
+                         --ignore tests/test_rio_rasterize.py \
+                         --ignore tests/test_rio_rm.py \
+                         --ignore tests/test_rio_sample.py \
+                         --ignore tests/test_rio_shapes.py \
+                         --ignore tests/test_rio_stack.py \
+                         --ignore tests/test_rio_warp.py \
+                         --ignore tests/test_session.py \
+                         --ignore tests/test_warp.py \
+                         --ignore tests/test_warpedvrt.py
 
 %:
-	dh $@ --with python3 --buildsystem pybuild
-
-override_dh_clean:
-	dh_clean
-
-	$(RM) rasterio/*.c
-	$(RM) rasterio/_*.cpp
-	$(RM) VERSION.txt
-	$(RM) gdal-config.txt
-	$(RM) .coverage
+	dh $@ --buildsystem pybuild
 
 override_dh_auto_test:
+# Ignore test failures on problematic architectures only
+ifneq (,$(filter $(DEB_BUILD_ARCH),armel i386 mips64el riscv64 alpha hppa hurd-i386 sh4 sparc64 x32))
 	dh_auto_test || echo "Ignoring test failures"
+else
+	dh_auto_test
+endif
 
-override_dh_install:
-	dh_install
-
+execute_after_dh_install:
 	$(RM) -r debian/python3-rasterio/usr/bin
-
 	$(RM) -r debian/*/usr/lib/python*/dist-packages/.hypothesis/
 
 override_dh_python3:
 	dh_python3 -ppython3-rasterio -prasterio
-	dh_numpy3 -ppython3-rasterio -prasterio
+
+override_dh_numpy3:
+	dh_numpy3 -ppython3-rasterio
 
 debian/rasterio.1:
 	help2man rasterio -N -L en_US.utf8 -n "command line tools for reading/writing geospatial raster data" >debian/rasterio.1

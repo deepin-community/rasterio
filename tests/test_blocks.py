@@ -13,8 +13,6 @@ from rasterio import windows
 from rasterio.errors import RasterBlockError
 from rasterio.profiles import default_gtiff_profile
 
-from .conftest import requires_gdal2
-
 
 class WindowTest(unittest.TestCase):
 
@@ -170,7 +168,6 @@ def test_block_windows_filtered_none(path_rgb_byte_tif):
             next(itr)
 
 
-@requires_gdal2(reason="TIFF block size access requires GDAL 2.0")
 def test_block_size_tiff(path_rgb_byte_tif):
     """Without compression a TIFF's blocks are all the same size"""
     with rasterio.open(path_rgb_byte_tif) as src:
@@ -180,7 +177,6 @@ def test_block_size_tiff(path_rgb_byte_tif):
         assert sizes.count(7119) == len(block_windows) - 1
 
 
-@requires_gdal2(reason="TIFF block size access requires GDAL 2.0")
 def test_block_size_exception():
     """A JPEG has no TIFF metadata and no API for block size"""
     with pytest.raises(RasterBlockError):
@@ -195,14 +191,14 @@ def test_block_window_tiff(path_rgb_byte_tif):
             assert src.block_window(1, i, j) == w
 
 
-@pytest.mark.parametrize("blocksize", [16, 32, 256, 1024])
+@pytest.mark.parametrize("blocksize", [32, 256, 1024])
 def test_block_windows_bigger_blocksize(tmpdir, blocksize):
     """Ensure that block sizes greater than raster size are ok"""
     tempfile = str(tmpdir.join("test.tif"))
     profile = default_gtiff_profile.copy()
     profile.update(height=16, width=16, count=1, blockxsize=blocksize, blockysize=blocksize)
     with rasterio.open(tempfile, "w", **profile) as dst:
-        assert dst.is_tiled
+        assert all((blocksize, blocksize) == (h, w) for (h, w) in dst.block_shapes)
         for ij, window in dst.block_windows():
             dst.write(np.ones((1, 1), dtype="uint8"), 1, window=window)
 

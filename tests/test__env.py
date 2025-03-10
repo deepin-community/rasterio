@@ -2,9 +2,14 @@
 
 import pytest
 
-from rasterio._env import GDALDataFinder, PROJDataFinder
+from rasterio._env import (
+    GDALDataFinder,
+    PROJDataFinder,
+    get_proj_data_search_paths,
+    get_gdal_data,
+)
 
-from .conftest import gdal_version, requires_gdal_lt_3
+from .conftest import gdal_version
 
 
 @pytest.fixture
@@ -13,7 +18,7 @@ def mock_wheel(tmpdir):
     moduledir = tmpdir.mkdir("rasterio")
     moduledir.ensure("__init__.py")
     moduledir.ensure("_env.py")
-    moduledir.ensure("gdal_data/header.dxf")
+    moduledir.ensure("gdal_data/gdalvrt.xsd")
     moduledir.ensure("proj_data/epsg")
     return moduledir
 
@@ -21,7 +26,7 @@ def mock_wheel(tmpdir):
 @pytest.fixture
 def mock_fhs(tmpdir):
     """A fake FHS system"""
-    tmpdir.ensure("share/gdal/header.dxf")
+    tmpdir.ensure("share/gdal/gdalvrt.xsd")
     tmpdir.ensure("share/proj/epsg")
     return tmpdir
 
@@ -29,13 +34,9 @@ def mock_fhs(tmpdir):
 @pytest.fixture
 def mock_debian(tmpdir):
     """A fake Debian multi-install system"""
-    tmpdir.ensure("share/gdal/2.3/header.dxf")
-    tmpdir.ensure("share/gdal/2.4/header.dxf")
-    tmpdir.ensure("share/gdal/3.0/header.dxf")
-    tmpdir.ensure("share/gdal/3.1/header.dxf")
-    tmpdir.ensure("share/gdal/3.2/header.dxf")
-    tmpdir.ensure("share/gdal/3.3/header.dxf")
-    tmpdir.ensure("share/gdal/3.4/header.dxf")
+    tmpdir.ensure("share/gdal/3.5/gdalvrt.xsd")
+    tmpdir.ensure("share/gdal/3.6/gdalvrt.xsd")
+    tmpdir.ensure(f"share/gdal/{gdal_version.major}.{gdal_version.minor}/gdalvrt.xsd")
     tmpdir.ensure("share/proj/epsg")
     return tmpdir
 
@@ -73,7 +74,9 @@ def test_search_debian_gdal_data_failure(tmpdir):
 def test_search_debian_gdal_data(mock_debian):
     """Find GDAL data under Debian locations"""
     finder = GDALDataFinder()
-    assert finder.search_debian(str(mock_debian)) == str(mock_debian.join("share").join("gdal").join("{}".format(str(gdal_version))))
+    assert finder.search_debian(str(mock_debian)) == str(
+        mock_debian.join("share").join("gdal").join(f"{str(gdal_version)}")
+    )
 
 
 def test_search_gdal_data_wheel(mock_wheel):
@@ -89,7 +92,9 @@ def test_search_gdal_data_fhs(mock_fhs):
 def test_search_gdal_data_debian(mock_debian):
     """Find GDAL data under Debian locations"""
     finder = GDALDataFinder()
-    assert finder.search(str(mock_debian)) == str(mock_debian.join("share").join("gdal").join("{}".format(str(gdal_version))))
+    assert finder.search(str(mock_debian)) == str(
+        mock_debian.join("share").join("gdal").join(f"{str(gdal_version)}")
+    )
 
 
 def test_search_wheel_proj_data_failure(tmpdir):
@@ -124,3 +129,13 @@ def test_search_proj_data_wheel(mock_wheel):
 def test_search_proj_data_fhs(mock_fhs):
     finder = PROJDataFinder()
     assert finder.search(str(mock_fhs)) == str(mock_fhs.join("share").join("proj"))
+
+
+def test_get_proj_data_search_paths():
+    assert isinstance(get_proj_data_search_paths(), list)
+
+
+def test_get_gdal_data():
+    gdal_data = get_gdal_data()
+    if gdal_data is not None:
+        assert isinstance(gdal_data, str) and gdal_data

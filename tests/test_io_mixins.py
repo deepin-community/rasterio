@@ -2,7 +2,6 @@ from affine import Affine
 import pytest
 
 import rasterio
-from rasterio.errors import RasterioDeprecationWarning
 from rasterio.windows import Window, WindowMethodsMixin
 
 
@@ -16,7 +15,7 @@ def assert_window_almost_equals(a, b, precision=3):
     assert round(a.height, precision) == round(b.height, precision)
 
 
-class MockDatasetBase(object):
+class MockDatasetBase:
     def __init__(self):
         # from tests/data/RGB.byte.tif
         self.affine = Affine(300.0379266750948, 0.0, 101985.0,

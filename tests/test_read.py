@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 
 import rasterio
-from rasterio.errors import DatasetIOShapeError
+from rasterio._err import CPLE_AppDefinedError
+from rasterio.errors import DatasetIOShapeError, RasterioIOError
 
 # Find out if we've got HDF support (needed below).
 try:
@@ -199,36 +200,6 @@ class ReaderContextTest(unittest.TestCase):
             a = s.read(window=((-100, 20000), (-100, 20000)))
             self.assertEqual(a.shape, (3, 100, 100))
 
-    def test_read_out(self):
-        with rasterio.open('tests/data/RGB.byte.tif') as s:
-            # regular array, without mask
-            a = np.empty((3, 718, 791), np.ubyte)
-            b = s.read(out=a)
-            self.assertFalse(hasattr(a, 'mask'))
-            self.assertFalse(hasattr(b, 'mask'))
-            # with masked array
-            a = np.ma.empty((3, 718, 791), np.ubyte)
-            b = s.read(out=a)
-            self.assertEqual(id(a.data), id(b.data))
-            # TODO: is there a way to id(a.mask)?
-            self.assertTrue(hasattr(a, 'mask'))
-            self.assertTrue(hasattr(b, 'mask'))
-            # use all parameters
-            a = np.empty((1, 20, 10), np.ubyte)
-            b = s.read([2], a, ((310, 330), (320, 330)), False)
-            self.assertEqual(id(a), id(b))
-            # pass 2D array with index
-            a = np.empty((20, 10), np.ubyte)
-            b = s.read(2, a, ((310, 330), (320, 330)), False)
-            self.assertEqual(id(a), id(b))
-            self.assertEqual(a.ndim, 2)
-            # different number of array dimensions
-            a = np.empty((20, 10), np.ubyte)
-            self.assertRaises(ValueError, s.read, [2], out=a)
-            # different number of array shape in 3D
-            a = np.empty((2, 20, 10), np.ubyte)
-            self.assertRaises(ValueError, s.read, [2], out=a)
-
     def test_read_nan_nodata(self):
         with rasterio.open('tests/data/float_nan.tif') as s:
             a = s.read(masked=True)
@@ -255,6 +226,20 @@ class ReaderContextTest(unittest.TestCase):
             self.assertEqual(s.meta['dtype'], 'float_')
             self.assertIsNone(s.meta['nodata'])
             self.assertRaises(ValueError, s.read)
+
+    def test_read_gtiff_band_interleave_multithread(self):
+        """Test workaround for https://github.com/rasterio/rasterio/issues/2847."""
+
+        with rasterio.Env(GDAL_NUM_THREADS='2'), rasterio.open('tests/data/rgb_deflate.tif') as s:
+            s.read(1)
+            a = s.read(2)
+            self.assertEqual(a.sum(), 25282412)
+
+        with rasterio.Env(GDAL_NUM_THREADS='2'), rasterio.open('tests/data/rgb_deflate.tif') as s:
+            a = s.read(indexes=[3,2,1])
+            self.assertEqual(a[0].sum(), 27325233)
+            self.assertEqual(a[1].sum(), 25282412)
+            self.assertEqual(a[2].sum(), 17008452)
 
 
 @pytest.mark.parametrize("shape,indexes", [
@@ -287,7 +272,7 @@ def test_out_shape(path_rgb_byte_tif, shape, indexes):
             assert out_shape.shape == out.shape
             assert (out_shape == out).all()
 
-            # Sanity check fo the test itself
+            # Sanity check of the test itself
             assert shape[-2:] == (72, 80)
 
 
@@ -321,3 +306,60 @@ def test_out_shape_no_segfault(path_rgb_byte_tif):
     with rasterio.open(path_rgb_byte_tif) as src:
         with pytest.raises(DatasetIOShapeError):
             src.read(out_shape=(2, src.height, src.width))
+
+
+def test_read_out_no_mask(path_rgb_byte_tif):
+    """Find no mask when out keyword arg is not masked."""
+    with rasterio.open(path_rgb_byte_tif) as src:
+        a = np.empty((3, 718, 791), np.ubyte)
+        b = src.read(out=a)
+        assert not hasattr(a, "mask")
+        assert not hasattr(b, "mask")
+
+
+def test_read_out_mask(path_rgb_byte_tif):
+    """Find a mask when out keyword arg is a masked array."""
+    with rasterio.open(path_rgb_byte_tif) as src:
+        a = np.ma.empty((3, 718, 791), np.ubyte)
+        b = src.read(out=a)
+        assert hasattr(a, "mask")
+        assert hasattr(b, "mask")
+
+
+@pytest.mark.parametrize(
+    "out", [np.empty((20, 10), np.ubyte), np.empty((2, 20, 10), np.ubyte)]
+)
+def test_read_out_mask(path_rgb_byte_tif, out):
+    """Raise when out keyword arg has wrong shape."""
+    with rasterio.open(path_rgb_byte_tif) as src:
+        with pytest.raises(ValueError):
+            src.read(indexes=[2], out=out)
+
+
+def test_chained_io_errors(path_rgb_byte_tif):
+    """Get chained exceptions."""
+    with rasterio.open("tests/data/corrupt.tif") as src:
+        # RasterioIOError is at the top of the stack (~0).
+        with pytest.raises(RasterioIOError) as excinfo:
+            src.read()
+
+        assert "Read failed. See previous exception for details." == str(excinfo.value)
+
+        # Exception ~1 is a GDAL AppDefinedError mentioning IReadBlock.
+        exc = excinfo.value.__cause__
+        assert isinstance(exc, CPLE_AppDefinedError)
+        msg = str(exc)
+        assert "corrupt.tif" in msg
+        assert "IReadBlock failed" in msg
+
+        # Exception ~2 is another AppDefinedError mentioning TIFFReadEncodedTile.
+        exc = excinfo.value.__cause__.__cause__
+        assert isinstance(exc, CPLE_AppDefinedError)
+        msg = str(exc)
+        assert "TIFFReadEncodedTile()" in msg
+
+        # Exception ~3 is another AppDefinedError mentioning TIFFFillTile.
+        exc = excinfo.value.__cause__.__cause__.__cause__
+        assert isinstance(exc, CPLE_AppDefinedError)
+        msg = str(exc)
+        assert "TIFFFillTile:Read error" in msg

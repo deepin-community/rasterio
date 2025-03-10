@@ -6,7 +6,6 @@ import re
 
 import numpy as np
 import pytest
-from shapely.geometry import shape
 
 import rasterio
 from rasterio.rio.main import main_group
@@ -20,16 +19,14 @@ def bbox(*args):
 
 
 def test_shapes(runner, pixelated_image_file):
-    with pytest.warns(None):
-
-        result = runner.invoke(main_group, ['shapes', '--collection', pixelated_image_file])
-
-        assert result.exit_code == 0
-        assert result.output.count('"FeatureCollection"') == 1
-        assert result.output.count('"Feature"') == 4
-        assert np.allclose(
-            json.loads(result.output)['features'][0]['geometry']['coordinates'],
-            [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]])
+    result = runner.invoke(main_group, ["shapes", "--collection", pixelated_image_file])
+    assert result.exit_code == 0
+    assert result.output.count('"FeatureCollection"') == 1
+    assert result.output.count('"Feature"') == 4
+    assert np.allclose(
+        json.loads(result.output)["features"][0]["geometry"]["coordinates"],
+        [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]],
+    )
 
 
 def test_shapes_invalid_bidx(runner, pixelated_image_file):
@@ -45,15 +42,14 @@ def test_shapes_sequence(runner, pixelated_image_file):
     --sequence option should produce 4 features in series rather than
     inside a feature collection.
     """
-    with pytest.warns(None):
+    result = runner.invoke(
+        main_group, ["shapes", "--collection", pixelated_image_file, "--sequence"]
+    )
 
-        result = runner.invoke(
-            main_group, ['shapes', '--collection', pixelated_image_file, '--sequence'])
-
-        assert result.exit_code == 0
-        assert result.output.count('"FeatureCollection"') == 0
-        assert result.output.count('"Feature"') == 4
-        assert result.output.count('\n') == 4
+    assert result.exit_code == 0
+    assert result.output.count('"FeatureCollection"') == 0
+    assert result.output.count('"Feature"') == 4
+    assert result.output.count("\n") == 4
 
 
 def test_shapes_sequence_rs(runner, pixelated_image_file):
@@ -65,7 +61,7 @@ def test_shapes_sequence_rs(runner, pixelated_image_file):
     assert result.exit_code == 0
     assert result.output.count('"FeatureCollection"') == 0
     assert result.output.count('"Feature"') == 4
-    assert result.output.count(u'\u001e') == 4
+    assert result.output.count("\u001e") == 4
 
 
 def test_shapes_with_nodata(runner, pixelated_image, pixelated_image_file):
@@ -73,7 +69,6 @@ def test_shapes_with_nodata(runner, pixelated_image, pixelated_image_file):
     An area of nodata should also be represented with a shape when using
     --with-nodata option
     """
-
     pixelated_image[0:2, 8:10] = 255
 
     with rasterio.open(pixelated_image_file, 'r+') as out:
@@ -90,29 +85,27 @@ def test_shapes_indent(runner, pixelated_image_file):
     """
     --indent option should produce lots of newlines and contiguous spaces
     """
-    with pytest.warns(None):
+    result = runner.invoke(
+        main_group, ["shapes", "--collection", pixelated_image_file, "--indent", 2]
+    )
 
-        result = runner.invoke(
-            main_group, ['shapes', '--collection', pixelated_image_file, '--indent', 2])
-
-        assert result.exit_code == 0
-        assert result.output.count('"FeatureCollection"') == 1
-        assert result.output.count('"Feature"') == 4
-        assert result.output.count("\n") > 100
-        assert result.output.count("        ") > 100
+    assert result.exit_code == 0
+    assert result.output.count('"FeatureCollection"') == 1
+    assert result.output.count('"Feature"') == 4
+    assert result.output.count("\n") > 100
+    assert result.output.count("        ") > 100
 
 
 def test_shapes_compact(runner, pixelated_image_file):
-    with pytest.warns(None):
+    result = runner.invoke(
+        main_group, ["shapes", "--collection", pixelated_image_file, "--compact"]
+    )
 
-        result = runner.invoke(
-            main_group, ['shapes', '--collection', pixelated_image_file, '--compact'])
-
-        assert result.exit_code == 0
-        assert result.output.count('"FeatureCollection"') == 1
-        assert result.output.count('"Feature"') == 4
-        assert result.output.count(', ') == 0
-        assert result.output.count(': ') == 0
+    assert result.exit_code == 0
+    assert result.output.count('"FeatureCollection"') == 1
+    assert result.output.count('"Feature"') == 4
+    assert result.output.count(", ") == 0
+    assert result.output.count(": ") == 0
 
 
 def test_shapes_sampling(runner, pixelated_image_file):
@@ -139,6 +132,8 @@ def test_shapes_precision(runner, pixelated_image_file):
 
 def test_shapes_mask(runner, pixelated_image, pixelated_image_file):
     """ --mask should extract the nodata area of the image """
+    shapely = pytest.importorskip("shapely", reason="Test requires shapely.")
+    from shapely.geometry import shape
 
     pixelated_image[0:5, 0:10] = 255
     pixelated_image[0:10, 0:3] = 255
@@ -147,19 +142,22 @@ def test_shapes_mask(runner, pixelated_image, pixelated_image_file):
     with rasterio.open(pixelated_image_file, 'r+') as out:
         out.write(pixelated_image, indexes=1)
 
-    with pytest.warns(None):
-        result = runner.invoke(
-            main_group, ['shapes', '--collection', pixelated_image_file, '--mask'])
-        assert result.exit_code == 0
-        assert result.output.count('"FeatureCollection"') == 1
-        assert result.output.count('"Feature"') == 1
-        assert shape(json.loads(result.output)["features"][0]["geometry"]).area == 31.0
+    result = runner.invoke(
+        main_group, ["shapes", "--collection", pixelated_image_file, "--mask"]
+    )
+    assert result.exit_code == 0
+    assert result.output.count('"FeatureCollection"') == 1
+    assert result.output.count('"Feature"') == 1
+    assert shape(json.loads(result.output)["features"][0]["geometry"]).area == 31.0
 
 
 def test_shapes_mask_sampling(runner, pixelated_image, pixelated_image_file):
     """using --sampling with the mask should snap coordinates to the nearest
     factor of 5
     """
+    shapely = pytest.importorskip("shapely", reason="Test requires shapely.")
+    from shapely.geometry import shape
+
     pixelated_image[0:5, 0:10] = 255
     pixelated_image[0:10, 0:3] = 255
     pixelated_image[8:10, 8:10] = 255
@@ -167,16 +165,15 @@ def test_shapes_mask_sampling(runner, pixelated_image, pixelated_image_file):
     with rasterio.open(pixelated_image_file, 'r+') as out:
         out.write(pixelated_image, indexes=1)
 
-    with pytest.warns(None):
+    result = runner.invoke(
+        main_group,
+        ["shapes", "--collection", pixelated_image_file, "--mask", "--sampling", 5],
+    )
 
-        result = runner.invoke(
-            main_group,
-            ['shapes', '--collection', pixelated_image_file, '--mask', '--sampling', 5])
-
-        assert result.exit_code == 0
-        assert result.output.count('"FeatureCollection"') == 1
-        assert result.output.count('"Feature"') == 1
-        assert shape(json.loads(result.output)["features"][0]["geometry"]).area == 25.0
+    assert result.exit_code == 0
+    assert result.output.count('"FeatureCollection"') == 1
+    assert result.output.count('"Feature"') == 1
+    assert shape(json.loads(result.output)["features"][0]["geometry"]).area == 25.0
 
 
 def test_shapes_band1_as_mask(runner, pixelated_image, pixelated_image_file):
@@ -184,18 +181,28 @@ def test_shapes_band1_as_mask(runner, pixelated_image, pixelated_image_file):
     When using --as-mask option, pixel value should not matter, only depends
     on pixels being contiguous.
     """
+    shapely = pytest.importorskip("shapely", reason="Test requires shapely.")
+    from shapely.geometry import shape
 
     pixelated_image[2:3, 2:3] = 4
 
     with rasterio.open(pixelated_image_file, 'r+') as out:
         out.write(pixelated_image, indexes=1)
 
-    with pytest.warns(None):
-        result = runner.invoke(
-            main_group,
-            ['shapes', '--collection', pixelated_image_file, '--band', '--bidx', '1', '--as-mask'])
+    result = runner.invoke(
+        main_group,
+        [
+            "shapes",
+            "--collection",
+            pixelated_image_file,
+            "--band",
+            "--bidx",
+            "1",
+            "--as-mask",
+        ],
+    )
 
-        assert result.exit_code == 0
-        assert result.output.count('"FeatureCollection"') == 1
-        assert result.output.count('"Feature"') == 3
-        assert shape(json.loads(result.output)["features"][0]["geometry"]).area == 1.0
+    assert result.exit_code == 0
+    assert result.output.count('"FeatureCollection"') == 1
+    assert result.output.count('"Feature"') == 3
+    assert shape(json.loads(result.output)["features"][0]["geometry"]).area == 1.0
