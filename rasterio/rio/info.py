@@ -3,6 +3,7 @@
 
 import json
 
+from attr import asdict
 import click
 
 import rasterio
@@ -72,7 +73,7 @@ def info(ctx, input, aspect, indent, namespace, meta_member, verbose, bidx,
         if src.crs:
             epsg = src.crs.to_epsg()
             if epsg:
-                info['crs'] = 'EPSG:{}'.format(epsg)
+                info["crs"] = f"EPSG:{epsg}"
             else:
                 info['crs'] = src.crs.to_string()
         else:
@@ -96,7 +97,7 @@ def info(ctx, input, aspect, indent, namespace, meta_member, verbose, bidx,
             if gcps_crs:
                 epsg = gcps_crs.to_epsg()
                 if epsg:
-                    info['gcps']['crs'] = 'EPSG:{}'.format(epsg)
+                    info["gcps"]["crs"] = f"EPSG:{epsg}"
                 else:
                     info['gcps']['crs'] = src.crs.to_string()
             else:
@@ -105,10 +106,7 @@ def info(ctx, input, aspect, indent, namespace, meta_member, verbose, bidx,
             info['gcps']['transform'] = from_gcps(gcps)
 
         if verbose:
-            stats = [{'min': float(b.min()),
-                      'max': float(b.max()),
-                      'mean': float(b.mean())
-                      } for b in src.read(masked=masked)]
+            stats = [asdict(so) for so in src.stats()]
             info['stats'] = stats
             info['checksum'] = [src.checksum(i) for i in src.indexes]
 
@@ -117,11 +115,8 @@ def info(ctx, input, aspect, indent, namespace, meta_member, verbose, bidx,
                 for name in src.subdatasets:
                     click.echo(name)
             elif meta_member == 'stats':
-                band = src.read(bidx, masked=masked)
-                click.echo('%f %f %f' % (
-                    float(band.min()),
-                    float(band.max()),
-                    float(band.mean())))
+                st = src.statistics(bidx)
+                click.echo("{st.min} {st.max} {st.mean} {st.std}".format(st=st))
             elif meta_member == 'checksum':
                 click.echo(str(src.checksum(bidx)))
             elif meta_member:

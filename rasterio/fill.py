@@ -1,19 +1,16 @@
 """Fill holes in raster dataset by interpolation from the edges."""
 
-import rasterio
+from numpy.ma import MaskedArray
+
 from rasterio._fill import _fillnodata
 from rasterio.env import ensure_env
 from rasterio import dtypes
 
-from numpy.ma import MaskedArray
-
 
 @ensure_env
 def fillnodata(
-        image,
-        mask=None,
-        max_search_distance=100.0,
-        smoothing_iterations=0):
+    image, mask=None, max_search_distance=100.0, smoothing_iterations=0, **filloptions
+):
     """Fill holes in raster data by interpolation
 
     This algorithm will interpolate values for all designated nodata
@@ -32,11 +29,11 @@ def fillnodata(
 
     Parameters
     ----------
-    image : numpy ndarray
+    image : numpy.ndarray
         The source image with holes to be filled. If a MaskedArray, the
         inverse of its mask will define the pixels to be filled --
         unless the ``mask`` argument is not None (see below).`
-    mask : numpy ndarray or None
+    mask : numpy.ndarray, optional
         A mask band indicating which pixels to interpolate. Pixels to
         interpolate into are indicated by the value 0. Values
         > 0 indicate areas to use during interpolation. Must be same
@@ -49,10 +46,15 @@ def fillnodata(
     smoothing_iterations : integer, optional
         The number of 3x3 smoothing filter passes to run. The default is
         0.
+    filloptions :
+        Keyword arguments providing finer control over filling. See
+        https://gdal.org/en/stable/api/gdal_alg.html. Lowercase option
+        names and numerical values are allowed. For example:
+        nodata=0 is a valid keyword argument.
 
     Returns
     -------
-    out : numpy ndarray
+    numpy.ndarray :
         The filled raster array.
     """
     if mask is None and isinstance(image, MaskedArray):
@@ -67,5 +69,4 @@ def fillnodata(
 
     max_search_distance = float(max_search_distance)
     smoothing_iterations = int(smoothing_iterations)
-    return _fillnodata(
-        image, mask, max_search_distance, smoothing_iterations)
+    return _fillnodata(image, mask, max_search_distance, smoothing_iterations)

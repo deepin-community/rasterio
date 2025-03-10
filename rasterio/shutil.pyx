@@ -1,16 +1,9 @@
-# cython: language_level=3
-
 """Raster file management."""
 
 include "gdal.pxi"
 
 import logging
-
-try:
-    from pathlib import Path
-except ImportError:  # pragma: no cover
-    class Path:
-        pass
+import os
 
 from rasterio._io cimport DatasetReaderBase
 from rasterio._err cimport exc_wrap_int, exc_wrap_pointer
@@ -18,7 +11,7 @@ from rasterio.drivers import driver_from_extension
 from rasterio.env import ensure_env_with_credentials
 from rasterio._err import CPLE_OpenFailedError
 from rasterio.errors import DriverRegistrationError, RasterioIOError
-from rasterio.path import parse_path
+from rasterio._path import _parse_path
 
 
 log = logging.getLogger(__name__)
@@ -37,7 +30,7 @@ def exists(path):
 
     cdef GDALDatasetH h_dataset = NULL
 
-    vsipath = parse_path(path).as_vsi()
+    vsipath = _parse_path(path).as_vsi()
     b_path = vsipath.encode('utf-8')
     cdef char* c_path = b_path
 
@@ -63,16 +56,16 @@ def copy(src, dst, driver=None, strict=True, **creation_options):
 
     Parameters
     ----------
-    src : str or pathlib.Path or dataset object opened in 'r' mode
+    src : str or PathLike or dataset object opened in 'r' mode
         Source dataset
-    dst : str or pathlib.Path
+    dst : str or PathLike
         Output dataset path
     driver : str, optional
         Output driver name
     strict : bool, optional.  Default: True
         Indicates if the output must be strictly equivalent or if the
         driver may adapt as necessary
-    creation_options : **kwargs, optional
+    creation_options : dict, optional
         Creation options for output dataset
 
     Returns
@@ -100,10 +93,10 @@ def copy(src, dst, driver=None, strict=True, **creation_options):
     c_strictness = strict
 
     # Convert src and dst Paths to strings.
-    if isinstance(src, Path):
-        src = str(src)
-    if isinstance(dst, Path):
-        dst = str(dst)
+    if isinstance(src, os.PathLike):
+        src = os.fspath(src)
+    if isinstance(dst, os.PathLike):
+        dst = os.fspath(dst)
 
     if driver is None:
         driver = driver_from_extension(dst)
@@ -117,7 +110,7 @@ def copy(src, dst, driver=None, strict=True, **creation_options):
     # Open a new GDAL dataset if src is a string.
     if isinstance(src, str):
 
-        if parse_path(src).as_vsi() == parse_path(dst).as_vsi():
+        if _parse_path(src).as_vsi() == _parse_path(dst).as_vsi():
             raise RasterioIOError("{} and {} identify the same dataset.".format(src, dst))
 
         src = src.encode('utf-8')
@@ -130,7 +123,7 @@ def copy(src, dst, driver=None, strict=True, **creation_options):
     # Try to use the existing GDAL dataset handle otherwise.
     else:
 
-        if src.name == parse_path(dst).as_vsi():
+        if src.name == _parse_path(dst).as_vsi():
             raise RasterioIOError("{} and {} identify the same dataset.".format(src.name, dst))
 
         src_dataset = (<DatasetReaderBase?>src).handle()
@@ -162,9 +155,9 @@ def copyfiles(src, dst):
 
     Parameters
     ----------
-    src : str or pathlib.Path
+    src : str or PathLike
         Source dataset
-    dst : str or pathlib.Path
+    dst : str or PathLike
         Target dataset
 
     Returns
@@ -177,17 +170,17 @@ def copyfiles(src, dst):
     cdef GDALDriverH h_driver = NULL
 
     # Convert src and dst Paths to strings.
-    if isinstance(src, Path):
-        src = str(src)
-    if isinstance(dst, Path):
-        dst = str(dst)
+    if isinstance(src, os.PathLike):
+        src = os.fspath(src)
+    if isinstance(dst, os.PathLike):
+        dst = os.fspath(dst)
 
-    src_path = parse_path(src)
-    dst_path = parse_path(dst)
+    src_path = _parse_path(src)
+    dst_path = _parse_path(dst)
     if src_path.as_vsi() == dst_path.as_vsi():
         raise RasterioIOError("{} and {} identify the same dataset.".format(src, dst))
 
-    # VFS paths probabaly don't work, but its hard to be completely certain
+    # VFS paths probably don't work, but its hard to be completely certain
     # so just attempt to use them.
     gdal_src_path = src_path.as_vsi()
     gdal_dst_path = dst_path.as_vsi()
@@ -230,7 +223,7 @@ def delete(path, driver=None):
     cdef GDALDatasetH h_dataset = NULL
     cdef GDALDriverH h_driver = NULL
 
-    gdal_path = parse_path(path).as_vsi()
+    gdal_path = _parse_path(path).as_vsi()
     b_path = gdal_path.encode('utf-8')
     cdef char* c_path = b_path
 

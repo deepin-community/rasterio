@@ -1,4 +1,4 @@
-# cython: language_level=3, c_string_type=unicode, c_string_encoding=utf8
+# cython: c_string_type=unicode, c_string_encoding=utf8
 
 """GDAL and OGR driver and configuration management
 
@@ -7,9 +7,8 @@ utilize CPLSetThreadLocalConfigOption instead. All threads use
 CPLGetConfigOption and not CPLGetThreadLocalConfigOption, thus child
 threads will inherit config options from the main thread unless the
 option is set to a new value inside the thread.
-"""
 
-include "gdal.pxi"
+"""
 
 from contextlib import contextmanager
 import logging
@@ -18,20 +17,20 @@ import os.path
 import sys
 import threading
 
-from rasterio._base cimport _safe_osr_release
 from rasterio._err import CPLE_BaseError
 from rasterio._err cimport exc_wrap_ogrerr, exc_wrap_int
-from rasterio._shim cimport set_proj_search_path
+from rasterio._filepath cimport install_filepath_plugin
+from rasterio._version import gdal_version
 
 from libc.stdio cimport stderr
-
 
 level_map = {
     0: 0,
     1: logging.DEBUG,
     2: logging.WARNING,
     3: logging.ERROR,
-    4: logging.CRITICAL }
+    4: logging.CRITICAL
+}
 
 code_map = {
     0: 'CPLE_None',
@@ -45,47 +44,74 @@ code_map = {
     8: 'CPLE_NoWriteAccess',
     9: 'CPLE_UserInterrupt',
     10: 'ObjectNull',
-
-    # error numbers 11-16 are introduced in GDAL 2.1. See
-    # https://github.com/OSGeo/gdal/pull/98.
     11: 'CPLE_HttpResponse',
     12: 'CPLE_AWSBucketNotFound',
     13: 'CPLE_AWSObjectNotFound',
     14: 'CPLE_AWSAccessDenied',
     15: 'CPLE_AWSInvalidCredentials',
-    16: 'CPLE_AWSSignatureDoesNotMatch'}
-
+    16: 'CPLE_AWSSignatureDoesNotMatch'
+}
 
 log = logging.getLogger(__name__)
 
 try:
     import certifi
-    os.environ.setdefault("CURL_CA_BUNDLE", certifi.where())
+    ca_bundle = certifi.where()
+    os.environ.setdefault("GDAL_CURL_CA_BUNDLE", ca_bundle)
+    os.environ.setdefault("PROJ_CURL_CA_BUNDLE", ca_bundle)
 except ImportError:
     pass
 
 cdef bint is_64bit = sys.maxsize > 2 ** 32
 
+cdef VSIFilesystemPluginCallbacksStruct* filepath_plugin = NULL
+cdef VSIFilesystemPluginCallbacksStruct* pyopener_plugin = NULL
 
-cdef void log_error(CPLErr err_class, int err_no, const char* msg) with gil:
-    """Send CPL debug messages and warnings to Python's logger."""
-    log = logging.getLogger(__name__)
-    if err_class < 3:
-        if err_no in code_map:
-            log.log(level_map[err_class], "%s in %s", code_map[err_no], msg)
+
+cdef void log_error(
+    CPLErr err_class,
+    int err_no,
+    const char* msg,
+) noexcept with gil:
+    """Send CPL errors to Python's logger.
+
+    Because this function is called by GDAL with no Python context, we
+    can't propagate exceptions that we might raise here. They'll be
+    ignored.
+
+    """
+    if err_no in code_map:
+        # We've observed that some GDAL functions may emit multiple
+        # ERROR level messages and yet succeed. We want to see those
+        # messages in our log file, but not at the ERROR level. We
+        # turn the level down to INFO.
+        if err_class == 3:
+            log.info(
+                "GDAL signalled an error: err_no=%r, msg=%r",
+                err_no,
+                msg
+            )
         else:
-            log.info("Unknown error number %r", err_no)
+            log.log(level_map[err_class], "%s in %s", code_map[err_no], msg)
+    else:
+        log.info("Unknown error number %r", err_no)
 
 
 # Definition of GDAL callback functions, one for Windows and one for
 # other platforms. Each calls log_error().
 IF UNAME_SYSNAME == "Windows":
-    cdef void __stdcall logging_error_handler(CPLErr err_class, int err_no,
-                                              const char* msg) with gil:
+    cdef void __stdcall logging_error_handler(
+        CPLErr err_class,
+        int err_no,
+        const char* msg,
+    ) noexcept with gil:
         log_error(err_class, err_no, msg)
 ELSE:
-    cdef void logging_error_handler(CPLErr err_class, int err_no,
-                                    const char* msg) with gil:
+    cdef void logging_error_handler(
+        CPLErr err_class,
+        int err_no,
+        const char* msg,
+    ) noexcept with gil:
         log_error(err_class, err_no, msg)
 
 
@@ -96,7 +122,7 @@ def driver_count():
 
 cpdef get_gdal_config(key, normalize=True):
     """Get the value of a GDAL configuration option.  When requesting
-    ``GDAL_CACHEMAX`` the value is returned unaltered. 
+    ``GDAL_CACHEMAX`` the value is returned unaltered.
 
     Parameters
     ----------
@@ -177,7 +203,7 @@ cpdef del_gdal_config(key):
         CPLSetThreadLocalConfigOption(<const char *>key, NULL)
 
 
-cdef class ConfigEnv(object):
+cdef class ConfigEnv:
     """Configuration option management"""
 
     def __init__(self, **options):
@@ -200,7 +226,7 @@ cdef class ConfigEnv(object):
         return {k: get_gdal_config(k) for k in self.options}
 
 
-class GDALDataFinder(object):
+class GDALDataFinder:
     """Finds GDAL data files
 
     Note: this is not part of the public API in 1.0.x.
@@ -212,7 +238,7 @@ class GDALDataFinder(object):
         Parameters
         ----------
         basename : str
-            Basename of a data file such as "header.dxf"
+            Basename of a data file such as "gdalvrt.xsd"
 
         Returns
         -------
@@ -250,18 +276,18 @@ class GDALDataFinder(object):
         if prefix is None:
             prefix = __file__
         datadir = os.path.abspath(os.path.join(os.path.dirname(prefix), "gdal_data"))
-        return datadir if os.path.exists(os.path.join(datadir, 'header.dxf')) else None
+        return datadir if os.path.exists(os.path.join(datadir, 'gdalvrt.xsd')) else None
 
     def search_prefix(self, prefix=sys.prefix):
         """Check sys.prefix location"""
         datadir = os.path.join(prefix, 'share', 'gdal')
-        return datadir if os.path.exists(os.path.join(datadir, 'header.dxf')) else None
+        return datadir if os.path.exists(os.path.join(datadir, 'gdalvrt.xsd')) else None
 
     def search_debian(self, prefix=sys.prefix):
         """Check Debian locations"""
-        gdal_release_name = GDALVersionInfo("RELEASE_NAME")
+        gdal_release_name = gdal_version()
         datadir = os.path.join(prefix, 'share', 'gdal', '{}.{}'.format(*gdal_release_name.split('.')[:2]))
-        return datadir if os.path.exists(os.path.join(datadir, 'header.dxf')) else None
+        return datadir if os.path.exists(os.path.join(datadir, 'gdalvrt.xsd')) else None
 
 
 @contextmanager
@@ -274,7 +300,7 @@ def catch_errors():
         CPLPopErrorHandler()
 
 
-class PROJDataFinder(object):
+class PROJDataFinder:
     """Finds PROJ data files
 
     Note: this is not part of the public API in 1.0.x.
@@ -298,7 +324,8 @@ class PROJDataFinder(object):
         else:
             return True
         finally:
-            _safe_osr_release(osr)
+            if osr != NULL:
+                OSRRelease(osr)
 
 
     def search(self, prefix=None):
@@ -329,12 +356,14 @@ class PROJDataFinder(object):
         return datadir if os.path.exists(datadir) else None
 
 
+_have_registered_drivers = False
+
+
 cdef class GDALEnv(ConfigEnv):
     """Configuration and driver management"""
 
     def __init__(self, **options):
         super().__init__(**options)
-        self._have_registered_drivers = False
 
     def start(self):
         CPLPushErrorHandler(<CPLErrorHandler>logging_error_handler)
@@ -342,56 +371,15 @@ cdef class GDALEnv(ConfigEnv):
         # The outer if statement prevents each thread from acquiring a
         # lock when the environment starts, and the inner avoids a
         # potential race condition.
-        if not self._have_registered_drivers:
-            with threading.Lock():
-                if not self._have_registered_drivers:
+        if not _have_registered_drivers:
 
+            with threading.Lock():
+
+                global _have_registered_drivers
+                if not _have_registered_drivers:
                     GDALAllRegister()
                     OGRRegisterAll()
-
-                    if 'GDAL_DATA' in os.environ:
-                        log.debug("GDAL_DATA found in environment.")
-                        self.update_config_options(GDAL_DATA=os.environ['GDAL_DATA'])
-
-                    else:
-                        path = GDALDataFinder().search_wheel()
-
-                        if path:
-                            log.debug("GDAL data found in package: path=%r.", path)
-                            self.update_config_options(GDAL_DATA=path)
-
-                        # See https://github.com/mapbox/rasterio/issues/1631.
-                        elif GDALDataFinder().find_file("header.dxf"):
-                            log.debug("GDAL data files are available at built-in paths.")
-
-                        else:
-                            path = GDALDataFinder().search()
-
-                            if path:
-                                log.debug("GDAL data found in other locations: path=%r.", path)
-                                self.update_config_options(GDAL_DATA=path)
-
-                    if 'PROJ_LIB' in os.environ:
-                        log.debug("PROJ_LIB found in environment.")
-                        path = os.environ["PROJ_LIB"]
-                        set_proj_data_search_path(path)
-
-                    else:
-                        path = PROJDataFinder().search_wheel()
-
-                        if path:
-                            log.debug("PROJ data found in package: path=%r.", path)
-                            set_proj_data_search_path(path)
-
-                        elif PROJDataFinder().has_data():
-                            log.debug("PROJ data files are available at built-in paths.")
-
-                        else:
-                            path = PROJDataFinder().search()
-
-                            if path:
-                                log.debug("PROJ data found in other locations: path=%r.", path)
-                                set_proj_data_search_path(path)
+                    install_filepath_plugin(filepath_plugin)
 
                     if driver_count() == 0:
                         CPLPopErrorHandler()
@@ -401,7 +389,57 @@ cdef class GDALEnv(ConfigEnv):
                     # will acquire a threadlock every time a new environment
                     # is started rather than just whenever the first thread
                     # actually makes it this far.
-                    self._have_registered_drivers = True
+                    _have_registered_drivers = True
+
+        if 'GDAL_DATA' in os.environ:
+            log.debug("GDAL_DATA found in environment.")
+            self.update_config_options(GDAL_DATA=os.environ['GDAL_DATA'])
+
+        else:
+            path = GDALDataFinder().search_wheel()
+
+            if path:
+                log.debug("GDAL data found in package: path=%r.", path)
+                self.update_config_options(GDAL_DATA=path)
+
+            # See https://github.com/rasterio/rasterio/issues/1631.
+            elif GDALDataFinder().find_file("gdalvrt.xsd"):
+                log.debug("GDAL data files are available at built-in paths.")
+
+            else:
+                path = GDALDataFinder().search()
+
+                if path:
+                    log.debug("GDAL data found in other locations: path=%r.", path)
+                    self.update_config_options(GDAL_DATA=path)
+
+        if 'PROJ_DATA' in os.environ:
+            # PROJ 9.1+
+            log.debug("PROJ_DATA found in environment.")
+            path = os.environ["PROJ_DATA"]
+            set_proj_data_search_path(path)
+        elif 'PROJ_LIB' in os.environ:
+            # PROJ < 9.1
+            log.debug("PROJ_LIB found in environment.")
+            path = os.environ["PROJ_LIB"]
+            set_proj_data_search_path(path)
+
+        else:
+            path = PROJDataFinder().search_wheel()
+
+            if path:
+                log.debug("PROJ data found in package: path=%r.", path)
+                set_proj_data_search_path(path)
+
+            elif PROJDataFinder().has_data():
+                log.debug("PROJ data files are available at built-in paths.")
+
+            else:
+                path = PROJDataFinder().search()
+
+                if path:
+                    log.debug("PROJ data found in other locations: path=%r.", path)
+                    set_proj_data_search_path(path)
 
         log.debug("Started GDALEnv: self=%r.", self)
 
@@ -428,7 +466,54 @@ cdef class GDALEnv(ConfigEnv):
     def _dump_open_datasets(self):
         GDALDumpOpenDatasets(stderr)
 
+    def _dump_vsimem(self):
+        dirs = VSIReadDir("/vsimem/")
+        num_dirs = CSLCount(dirs)
+        try:
+            return list([dirs[i] for i in range(num_dirs) if str(dirs[i])])
+        finally:
+            CSLDestroy(dirs)
+
 
 def set_proj_data_search_path(path):
-    """Set PROJ data search path"""
-    set_proj_search_path(path)
+    """Set PROJ data search path."""
+    path_b = path.encode("utf-8")
+    cdef const char *path_c = path_b
+    cdef char **paths = CSLAddString(NULL, path_c)
+    try:
+        OSRSetPROJSearchPaths(<const char *const *>paths)
+    finally:
+        CSLDestroy(paths)
+
+
+def get_proj_data_search_paths():
+    """
+    Get the PROJ DATA search paths.
+
+    Returns
+    -------
+    List[str]
+    """
+    path_list = []
+    cdef char **paths = OSRGetPROJSearchPaths()
+    cdef int iii = 0
+    while paths[iii] != NULL:
+        path_list.append(paths[iii])
+        iii += 1
+    try:
+        return path_list
+    finally:
+        CSLDestroy(paths)
+
+def get_gdal_data():
+    """
+    Get the GDAL DATA path.
+
+    Returns
+    -------
+    str
+    """
+    cdef const char *gdal_data = CPLGetConfigOption("GDAL_DATA", NULL)
+    if gdal_data != NULL:
+        return gdal_data
+    return None

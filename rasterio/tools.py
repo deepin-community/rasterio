@@ -1,7 +1,7 @@
 """Rasterio tools module
 
 See this RFC about Rasterio tools:
-https://github.com/mapbox/rasterio/issues/1300.
+https://github.com/rasterio/rasterio/issues/1300.
 """
 
 import json
@@ -10,7 +10,7 @@ import rasterio
 from rasterio.features import dataset_features
 
 
-class JSONSequenceTool(object):
+class JSONSequenceTool:
     """Extracts data from a dataset file and saves a JSON sequence
     """
 

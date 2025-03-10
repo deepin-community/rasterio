@@ -1,6 +1,5 @@
 """Rasterio's GDAL/AWS environment"""
 
-import attr
 from functools import wraps, total_ordering
 from inspect import getfullargspec as getargspec
 import logging
@@ -9,11 +8,18 @@ import re
 import threading
 import warnings
 
+import attr
+
 from rasterio._env import (
-        GDALEnv, get_gdal_config, set_gdal_config,
-        GDALDataFinder, PROJDataFinder, set_proj_data_search_path)
-from rasterio.errors import (
-    EnvError, GDALVersionError, RasterioDeprecationWarning)
+    GDALEnv,
+    get_gdal_config,
+    set_gdal_config,
+    GDALDataFinder,
+    PROJDataFinder,
+    set_proj_data_search_path,
+)
+from rasterio._version import gdal_version
+from rasterio.errors import EnvError, GDALVersionError, RasterioDeprecationWarning
 from rasterio.session import Session, DummySession
 
 
@@ -52,7 +58,7 @@ local = ThreadEnv()
 log = logging.getLogger(__name__)
 
 
-class Env(object):
+class Env:
     """Abstraction for GDAL and AWS configuration
 
     The GDAL library is stateful: it has a registry of format drivers,
@@ -197,6 +203,7 @@ class Env(object):
 
         elif 'AWS_ACCESS_KEY_ID' in os.environ and 'AWS_SECRET_ACCESS_KEY' in os.environ:
             self.session = Session.from_environ()
+            self._session_from_environ = True
 
         else:
             self.session = DummySession()
@@ -228,6 +235,9 @@ class Env(object):
         options.update(**kwargs)
         return Env(*args, **options)
 
+    def aws_creds_from_context_options(self):
+        return {k: v for k, v in self.context_options.items() if k.startswith('AWS_')}
+
     def credentialize(self):
         """Get credentials and configure GDAL
 
@@ -243,6 +253,15 @@ class Env(object):
         self.options.update(**cred_opts)
         setenv(**cred_opts)
 
+        if getattr(self, '_session_from_environ', False):
+            # if self.context_options has "AWS_*" credentials from parent context then it should
+            # always override what comes back from self.session.get_credential_options()
+            # b/c __init__ might have created a session from globally exported "AWS_*" os environ variables
+            parent_context_creds = self.aws_creds_from_context_options()
+            if not parent_context_creds: return
+            self.options.update(**parent_context_creds)
+            setenv(**parent_context_creds)
+
     def drivers(self):
         """Return a mapping of registered drivers."""
         return local._env.drivers()
@@ -253,6 +272,13 @@ class Env(object):
         For debugging and testing purposes.
         """
         return local._env._dump_open_datasets()
+
+    def _dump_vsimem(self):
+        """Returns contents of /vsimem/.
+
+        For debugging and testing purposes.
+        """
+        return local._env._dump_vsimem()
 
     def __enter__(self):
         log.debug("Entering env context: %r", self)
@@ -349,7 +375,7 @@ def delenv():
     local._env = None
 
 
-class NullContextManager(object):
+class NullContextManager:
 
     def __init__(self):
         pass
@@ -441,7 +467,7 @@ def ensure_env_with_credentials(f):
 
 @attr.s(slots=True)
 @total_ordering
-class GDALVersion(object):
+class GDALVersion:
     """Convenience class for obtaining GDAL major and minor version components
     and comparing between versions.  This is highly simplistic and assumes a
     very normal numbering scheme for versions and ignores everything except
@@ -457,10 +483,10 @@ class GDALVersion(object):
         return (self.major, self.minor) < tuple(other.major, other.minor)
 
     def __repr__(self):
-        return "GDALVersion(major={0}, minor={1})".format(self.major, self.minor)
+        return f"GDALVersion(major={self.major}, minor={self.minor})"
 
     def __str__(self):
-        return "{0}.{1}".format(self.major, self.minor)
+        return f"{self.major}.{self.minor}"
 
     @classmethod
     def parse(cls, input):
@@ -497,7 +523,6 @@ class GDALVersion(object):
     @classmethod
     def runtime(cls):
         """Return GDALVersion of current GDAL runtime"""
-        from rasterio._base import gdal_version  # to avoid circular import
         return cls.parse(gdal_version())
 
     def at_least(self, other):
@@ -511,22 +536,27 @@ def require_gdal_version(version, param=None, values=None, is_max_version=False,
     by the runtime version of GDAL.  Raises GDALVersionError if conditions
     are not met.
 
-    Examples:
-    \b
+    Examples
+    --------
+
+    .. code-block:: python
+
         @require_gdal_version('2.2')
         def some_func():
 
     calling `some_func` with a runtime version of GDAL that is < 2.2 raises a
     GDALVersionErorr.
 
-    \b
+    .. code-block:: python
+
         @require_gdal_version('2.2', param='foo')
         def some_func(foo='bar'):
 
     calling `some_func` with parameter `foo` of any value on GDAL < 2.2 raises
     a GDALVersionError.
 
-    \b
+    .. code-block:: python
+
         @require_gdal_version('2.2', param='foo', values=('bar',))
         def some_func(foo=None):
 
@@ -567,8 +597,8 @@ def require_gdal_version(version, param=None, values=None, is_max_version=False,
 
     version = GDALVersion.parse(version)
     runtime = GDALVersion.runtime()
-    inequality = '>=' if runtime < version else '<='
-    reason = '\n{0}'.format(reason) if reason else reason
+    inequality = ">=" if runtime < version else "<="
+    reason = f"\n{reason}" if reason else reason
 
     def decorator(f):
         @wraps(f)
@@ -578,7 +608,7 @@ def require_gdal_version(version, param=None, values=None, is_max_version=False,
 
                 if param is None:
                     raise GDALVersionError(
-                        "GDAL version must be {0} {1}{2}".format(
+                        "GDAL version must be {} {}{}".format(
                             inequality, str(version), reason))
 
                 # normalize args and kwds to dict
@@ -599,15 +629,19 @@ def require_gdal_version(version, param=None, values=None, is_max_version=False,
                         if param not in defaults or (
                                 full_kwds[param] != defaults[param]):
                             raise GDALVersionError(
-                                'usage of parameter "{0}" requires '
-                                'GDAL {1} {2}{3}'.format(param, inequality,
-                                                         version, reason))
+                                'usage of parameter "{}" requires '
+                                "GDAL {} {}{}".format(
+                                    param, inequality, version, reason
+                                )
+                            )
 
                     elif full_kwds[param] in values:
                         raise GDALVersionError(
-                            'parameter "{0}={1}" requires '
-                            'GDAL {2} {3}{4}'.format(
-                                param, full_kwds[param], inequality, version, reason))
+                            'parameter "{}={}" requires '
+                            "GDAL {} {}{}".format(
+                                param, full_kwds[param], inequality, version, reason
+                            )
+                        )
 
             return f(*args, **kwds)
 
@@ -626,8 +660,8 @@ if 'GDAL_DATA' not in os.environ:
         log.debug("GDAL data found in package: path=%r.", path)
         set_gdal_config("GDAL_DATA", path)
 
-    # See https://github.com/mapbox/rasterio/issues/1631.
-    elif GDALDataFinder().find_file("header.dxf"):
+    # See https://github.com/rasterio/rasterio/issues/1631.
+    elif GDALDataFinder().find_file("gdalvrt.xsd"):
         log.debug("GDAL data files are available at built-in paths.")
 
     else:
@@ -637,7 +671,12 @@ if 'GDAL_DATA' not in os.environ:
             set_gdal_config("GDAL_DATA", path)
             log.debug("GDAL data found in other locations: path=%r.", path)
 
-if "PROJ_LIB" in os.environ:
+if "PROJ_DATA" in os.environ:
+    # PROJ 9.1+
+    path = os.environ["PROJ_DATA"]
+    set_proj_data_search_path(path)
+elif "PROJ_LIB" in os.environ:
+    # PROJ < 9.1
     path = os.environ["PROJ_LIB"]
     set_proj_data_search_path(path)
 
@@ -646,7 +685,7 @@ elif PROJDataFinder().search_wheel():
     log.debug("PROJ data found in package: path=%r.", path)
     set_proj_data_search_path(path)
 
-# See https://github.com/mapbox/rasterio/issues/1631.
+# See https://github.com/rasterio/rasterio/issues/1631.
 elif PROJDataFinder().has_data():
     log.debug("PROJ data files are available at built-in paths.")
 

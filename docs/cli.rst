@@ -15,7 +15,7 @@ namespace and handling of context variables.
 
 .. code-block:: console
 
-    $ rio --help                                                                                                                         ⏎
+    $ rio --help
     Usage: rio [OPTIONS] COMMAND [ARGS]...
 
       Rasterio command line interface.
@@ -28,6 +28,7 @@ namespace and handling of context variables.
       --aws-requester-pays    Requester pays data transfer costs
       --version               Show the version and exit.
       --gdal-version
+      --show-versions         Show dependency versions
       --help                  Show this message and exit.
 
     Commands:
@@ -36,6 +37,7 @@ namespace and handling of context variables.
       calc       Raster data calculator.
       clip       Clip a raster to given bounds.
       convert    Copy and convert raster dataset.
+      create     Create an empty or filled dataset.
       edit-info  Edit dataset metadata.
       env        Print information about the Rasterio environment.
       gcps       Print ground control points as GeoJSON.
@@ -52,10 +54,8 @@ namespace and handling of context variables.
       transform  Transform coordinates.
       warp       Warp a raster dataset.
 
-
 Commands are shown below. See ``--help`` of individual commands for more
 details.
-
 
 creation options
 ----------------
@@ -75,10 +75,42 @@ To compress it using the LZW method, add
     --co compress=LZW
 
 
-bounds
+blocks
 ------
 
-Added in 0.10.
+This command prints features describing a raster's internal blocks, which are
+used directly for raster I/O.  These features can be used to visualize how a
+windowed operation would operate using those blocks.
+
+Output features have two JSON encoded properties: block and window. Block is a
+two element array like ``[0, 0]`` describing the window's position in the input
+band's window layout. Window is a JSON serialization of rasterio's Window class
+like ``{"col_off": 0, "height": 3, "row_off": 705, "width": 791}``.
+
+Block windows are extracted from the dataset (all bands must have matching
+block windows) by default, or from the band specified using the ``--bidx`` option:
+
+.. code-block:: console
+
+	rio blocks --bidx 3 tests/data/RGB.byte.tif
+
+By default a GeoJSON FeatureCollection is written. With the ``--sequence``
+option a GeoJSON feature stream is written instead.
+
+.. code-block:: console
+
+	rio blocks tests/data/RGB.byte.tif --sequence
+
+Output features are reprojected to OGC:CRS84 (WGS 84) unless the
+``--projected`` flag is provided, which causes the output to be kept in the
+input datasource's coordinate reference system.
+
+For more information on exactly what blocks and windows represent, see
+:func:`rasterio._base.DatasetBase.block_windows`.
+
+
+bounds
+------
 
 The ``bounds`` command writes the bounding boxes of raster datasets to GeoJSON for
 use with, e.g., `geojsonio-cli <https://github.com/mapbox/geojsonio-cli>`__.
@@ -129,11 +161,8 @@ use with, e.g., `geojsonio-cli <https://github.com/mapbox/geojsonio-cli>`__.
 Shoot the GeoJSON into a Leaflet map using geojsonio-cli by typing
 ``rio bounds tests/data/RGB.byte.tif | geojsonio``.
 
-
 calc
 ----
-
-Added in 0.19
 
 The ``calc`` command reads files as arrays, evaluates lisp-like expressions in
 their context, and writes the result as a new file. Members of the numpy
@@ -175,8 +204,6 @@ efficiently in Python.
 clip
 ----
 
-Added in 0.27
-
 The ``clip`` command clips a raster using bounds input directly or from a
 template raster.
 
@@ -195,12 +222,8 @@ It can also be combined to read bounds of a feature dataset using Fiona:
 
     $ rio clip input.tif output.tif --bounds $(fio info features.shp --bounds)
 
-
-
 convert
 -------
-
-Added in 0.25
 
 The ``convert`` command copies and converts raster datasets to other data types
 and formats (similar to ``gdal_translate``).
@@ -221,11 +244,31 @@ as uint8:
 
 You can use `--rgb` as shorthand for `--co photometric=rgb`.
 
+create
+------
+
+The ``create`` command creates an empty dataset.
+
+The fundamental, required parameters are: format driver name, data type, count
+of bands, height and width in pixels. Long and short options are provided for
+each of these. Coordinate reference system and affine transformation matrix are
+not strictly required and have long options only. All other format specific
+creation outputs must be specified using the --co option.
+
+The pixel values of an empty dataset are format specific. "Smart" formats like
+GTiff use 0 or the nodata value if provided.
+
+For example:
+
+.. code-block:: console
+
+    $ rio create new.tif -f GTiff -t uint8 -n 3 -h 512 -w 512 \
+    > --co tiled=true --co blockxsize=256 --co blockysize=256
+
+The command above produces a 3-band GeoTIFF with 256 x 256 internal tiling.
 
 edit-info
 ---------
-
-Added in 0.24
 
 The ``edit-info`` command allows you edit a raster dataset's metadata, namely
 
@@ -272,11 +315,8 @@ which can also be expressed as:
 See :class:`rasterio.enums.ColorInterp` for a full list of supported color
 interpretations and the color docs for more information.
 
-
 info
 ----
-
-Added in 0.13
 
 The ``info`` command prints structured information about a dataset.
 
@@ -383,8 +423,6 @@ The ``insp`` command opens a dataset and an interpreter.
 mask
 ----
 
-Added in 0.21
-
 The ``mask`` command masks in pixels from all bands of a raster using features
 (masking out all areas not covered by features) and optionally crops the output
 raster to the extent of the features.  Features are assumed to be in the same
@@ -414,8 +452,6 @@ keep pixels not covered by features.
 merge
 -----
 
-Added in 0.12.1
-
 The ``merge`` command can be used to flatten a stack of identically structured
 datasets.
 
@@ -426,8 +462,6 @@ datasets.
 
 overview
 --------
-
-New in 0.25
 
 The ``overview`` command creates overviews stored in the dataset, which can
 improve performance in some applications.
@@ -466,8 +500,6 @@ default value is 128.
 
 rasterize
 ---------
-
-New in 0.18.
 
 The ``rasterize`` command rasterizes GeoJSON features into a new or existing
 raster.
@@ -514,8 +546,6 @@ Other options are available, see:
 rm
 --
 
-New in 1.0
-
 Invoking the shell's ``$ rm <path>`` on a dataset can be used to
 delete a dataset referenced by a file path, but it won't handle
 deleting side car files.  This command is aware of datasets and
@@ -524,8 +554,6 @@ their sidecar files.
 
 sample
 ------
-
-New in 0.18.
 
 The sample command reads ``x, y`` positions from stdin and writes the dataset
 values at that position to stdout.
@@ -543,31 +571,28 @@ The output of the transform command (see below) makes good input for sample.
 shapes
 ------
 
-New in 0.11.
-
 The ``shapes`` command extracts and writes features of a specified dataset band
 out as GeoJSON.
 
 .. code-block:: console
 
-    $ rio shapes tests/data/shade.tif --bidx 1 --precision 6 > shade.geojson
+    $ rio shapes tests/data/shade.tif --bidx 1 --precision 6 --collection > shade.geojson
 
-The resulting file, uploaded to Mapbox, looks like this: `sgillies.j1ho338j <https://a.tiles.mapbox.com/v4/sgillies.j1ho338j/page.html?access_token=pk.eyJ1Ijoic2dpbGxpZXMiLCJhIjoiWUE2VlZVcyJ9.OITHkb1GHNh9nvzIfUc9QQ#13/39.6079/-106.4822>`__.
+The resulting file looks `like this <https://gist.github.com/sgillies/34a2a7f45ef7d8d10488a8382be6042f>`__.
 
 Using the ``--mask`` option you can write out the shapes of a dataset's valid
 data region.
 
 .. code-block:: console
 
-    $ rio shapes --mask --precision 6 tests/data/RGB.byte.tif | geojsonio
+    $ rio shapes tests/data/RGB.byte.tif --mask --precision 6 --collection > mask.geojson
 
-See http://bl.ocks.org/anonymous/raw/ef244954b719dba97926/.
+The output of which looks `like this <https://gist.github.com/sgillies/429df9c4d0e4d16073dd6e56e097a8eb>`__.
 
+Note: ``rio shapes`` returns line-delimited GeoJSONs by default. Use the ``--collection`` flag as shown here to return a single GeoJSON feature collection.
 
 stack
 -----
-
-New in 0.15.
 
 The ``stack`` command stacks a number of bands from one or more input files
 into a multiband dataset. Input datasets must be of a kind: same data type,
@@ -597,8 +622,6 @@ You can use `--rgb` as shorthand for `--co photometric=rgb`.
 transform
 ---------
 
-New in 0.10.
-
 The ``transform`` command reads a JSON array of coordinates, interleaved, and
 writes another array of transformed coordinates to stdout.
 
@@ -624,8 +647,6 @@ a raster dataset, do the following.
 
 warp
 ----
-
-New in 0.25
 
 The ``warp`` command warps (reprojects) a raster based on parameters that can be
 obtained from a template raster, or input directly.  The output is always
@@ -694,7 +715,7 @@ To use these plugins with rio, add the commands to the
 and in ``rasterio/rio/main.py``.
 
 See the
-`plugin registry <https://github.com/mapbox/rasterio/wiki/Rio-plugin-registry>`__
+`plugin registry <https://github.com/rasterio/rasterio/wiki/Rio-plugin-registry>`__
 for a list of available plugins.
 
 

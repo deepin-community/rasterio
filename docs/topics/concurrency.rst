@@ -18,7 +18,7 @@ simultaneously can lead to further speedups.
 
 .. note::
     If you wish to do multiprocessing that is not trivially parallelizable
-    accross very large images that do not fit in memory, or if you wish to
+    across very large images that do not fit in memory, or if you wish to
     do multiprocessing across multiple machines. You might want to have a
     look at `dask <https://dask.org/>`__ and in particular this
     `example <https://examples.dask.org/applications/satellite-imagery-geotiff.html>`__.
@@ -77,7 +77,6 @@ threads simultaneously.
     """
 
     import concurrent.futures
-    import multiprocessing
     import threading
 
     import rasterio
@@ -127,9 +126,8 @@ threads simultaneously.
                     executor.map(process, windows)
 
 The code above simulates a CPU-intensive calculation that runs faster when
-spread over multiple cores using the ``ThreadPoolExecutor`` from Python 3's
-``concurrent.futures`` module. Compared to the case of one concurrent job
-(``-j 1``),
+spread over multiple cores using  :class:`concurrent.futures.ThreadPoolExecutor`
+compared to the case of one concurrent job (``-j 1``),
 
 .. code-block:: console
 
@@ -150,11 +148,13 @@ we get over 3x speed up with four concurrent jobs.
    sys     0m0.168s
 
 If the function that you'd like to map over raster windows doesn't release the
-GIL, you unfortunately cannot simply replace ``ThreadPoolExecutor`` with
-``ProcessPoolExecutor``, the DatasetReader/Writer cannot be shared by multiple
-processes, which means that each process needs to open the file seperately,
-or you can do all the reading and writing from the main thread, as shown in
-this next example. This is much less efficient memory wise, however.
+GIL, you unfortunately cannot simply replace
+:class:`~concurrent.futures.ThreadPoolExecutor` with
+:class:`~concurrent.futures.ProcessPoolExecutor`.
+:class:`.DatasetReader`/:class:`.DatasetWriter` cannot be shared by multiple
+processes, which means that each process needs to open the file separately.
+You can do all the reading and writing from the main thread, as shown in this
+next example, at the expense of serializing arrays.
 
 .. code-block:: python
 
@@ -166,3 +166,11 @@ this next example. This is much less efficient memory wise, however.
         futures = executor.map(compute, arrays)
         for window, result in zip(windows, futures):
             dst.write(result, window=window)
+
+.. attention::
+   Deadlocks are easy to produce if we fork after GDAL drivers have been
+   registered. The only safe time to fork is before entering
+   a `rasterio.env.Env` context. Python's "spawn" mode is the safest option.
+   It's the default for Windows and macOS, but won't be the default for other
+   POSIX platforms until Python 3.14. Python 3.12 warns if we fork a process
+   when multiple threads are detected.

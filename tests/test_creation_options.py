@@ -5,10 +5,7 @@ import logging
 import rasterio
 from rasterio.profiles import DefaultGTiffProfile
 
-from .conftest import requires_gdal2
 
-
-@requires_gdal2(reason="GDAL 1.x warning text is obsolete")
 def test_warning(tmpdir, caplog):
     """Be warned about invalid creation options"""
     profile = DefaultGTiffProfile(
@@ -18,13 +15,11 @@ def test_warning(tmpdir, caplog):
     with rasterio.Env(GDAL_VALIDATE_CREATION_OPTIONS=True):
         rasterio.open(str(tmpdir.join("test.tif")), "w", **profile)
 
-    assert [
-        "CPLE_NotSupported in driver GTiff does not support creation option COMPRESSION",
-        "CPLE_NotSupported in driver GTiff does not support creation option FOO",
-    ] == sorted(
-        [
+    assert {
+            "CPLE_NotSupported in driver GTiff does not support creation option COMPRESSION",
+            "CPLE_NotSupported in driver GTiff does not support creation option FOO",
+    } <= {
             rec.message
             for rec in caplog.records
             if rec.levelno == logging.WARNING and rec.name == "rasterio._env"
-        ]
-    )
+    }

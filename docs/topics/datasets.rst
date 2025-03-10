@@ -3,7 +3,7 @@ Advanced Datasets
 
 The analogy of Python file objects influences the design of Rasterio dataset
 objects. Datasets of a few different kinds exist and the canonical way to
-obtain one is to call ``rasterio.open`` with a path-like object or URI-like
+obtain one is to call :func:`rasterio.open` with a path-like object or URI-like
 identifier, a mode (such as "r" or "w"), and other keyword arguments.
 
 Dataset Identifiers
@@ -31,7 +31,7 @@ identifiers.
 
 ``'netcdf:/path/to/file.nc:variable'``
 
-Datasets on the web are identifed by "http" or "https" URLs such as
+Datasets on the web are identified by "http" or "https" URLs such as
 
 * ``'https://example.com/file.tif'``
 * ``'https://landsat-pds.s3.amazonaws.com/L8/139/045/LC81390452014295LGN00/LC81390452014295LGN00_B1.TIF'``

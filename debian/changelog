@@ -1,8 +1,258 @@
-rasterio (1.2.10-1deepin1) unstable; urgency=medium
+rasterio (1.4.3-2) unstable; urgency=medium
 
-  * No source change upload against python 3.12.
+  * Team upload.
+  * Add patch to fix FTBFS with click 8.2.
+    (closes: #1098622)
+  * Update lintian overrides.
 
- -- Tianyu Chen <sweetyfish@deepin.org>  Mon, 08 Jul 2024 09:57:06 +0200
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 22 Feb 2025 09:26:21 +0100
+
+rasterio (1.4.3-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Drop python3-snuggs from build dependencies.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 03 Dec 2024 07:05:02 +0100
+
+rasterio (1.4.2-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 30 Oct 2024 15:06:32 +0100
+
+rasterio (1.4.1-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 01 Oct 2024 05:23:06 +0200
+
+rasterio (1.4.0-2) unstable; urgency=medium
+
+  * Team upload.
+  * Don't run autopkgtest on i386.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 26 Sep 2024 15:45:44 +0200
+
+rasterio (1.4.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Move from experimental to unstable.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 26 Sep 2024 04:58:52 +0200
+
+rasterio (1.4.0~rc2-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release candidate.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 11 Sep 2024 05:22:03 +0200
+
+rasterio (1.4.0~rc1-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release candidate.
+  * Ignore test failures on i386.
+  * Update lintian overrides.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 10 Sep 2024 05:15:28 +0200
+
+rasterio (1.4~b2-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream beta release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 31 Aug 2024 19:40:28 +0200
+
+rasterio (1.4~b1-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream beta release.
+  * Bump Standards-Version to 4.7.0, no changes.
+  * Update copyright file.
+  * Drop patches applied upstream.
+  * Add python3-fsspec to build dependencies.
+  * Ignore new tests requiring network.
+  * Update lintian overrides.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sun, 11 Aug 2024 21:07:45 +0200
+
+rasterio (1.3.10-2) unstable; urgency=medium
+
+  * Team upload.
+  * Add patch to fix FTBFS with GDAL 3.9.0.
+    (closes: #1069868)
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 26 Apr 2024 08:48:10 +0200
+
+rasterio (1.3.10-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Refresh patches.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 13 Apr 2024 06:29:33 +0200
+
+rasterio (1.3.9-4) unstable; urgency=medium
+
+  * Team upload.
+  * Replace gdal-3.8.patch with upstream changes.
+  * Update watch file to also ignore dev and alpha pre-releases.
+  * Add patch to fix FTBFS with pytest 8.
+    (closes: #1066747)
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 13 Mar 2024 17:04:28 +0100
+
+rasterio (1.3.9-3) unstable; urgency=medium
+
+  * Team upload.
+  * Ignore test failures on armel again.
+  * Ignore test failures on hppa.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 09 Nov 2023 05:18:51 +0100
+
+rasterio (1.3.9-2) unstable; urgency=medium
+
+  * Team upload.
+  * Don't ignore test failures on armel.
+  * Add patch to fix FTBFS with GDAL 3.8.0.
+    (closes: #1055594)
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 08 Nov 2023 21:33:21 +0100
+
+rasterio (1.3.9-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Use autopkgtest-pkg-pybuild testsuite.
+  * Enable Salsa CI.
+  * Remove generated files in clean target.
+    (closes: #1047850)
+  * Use execute_after instead of override in rules file.
+  * Update lintian overrides.
+  * Switch to dh-sequence-*.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 19 Oct 2023 05:28:17 +0200
+
+rasterio (1.3.8-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump debhelper compat to 13.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 27 Jun 2023 05:26:30 +0200
+
+rasterio (1.3.7-1) unstable; urgency=medium
+
+  * Team upload.
+  * Move from experimental to unstable.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sun, 11 Jun 2023 14:42:33 +0200
+
+rasterio (1.3.7-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Refresh patches.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Tue, 23 May 2023 05:27:22 +0200
+
+rasterio (1.3.6-1~exp1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Mon, 13 Feb 2023 20:17:07 +0100
+
+rasterio (1.3.5-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Add Rules-Requires-Root to control file.
+  * Enable numpy3 dh helper.
+  * Bump Standards-Version to 4.6.2, no changes.
+  * Add patch to fix ImportError with unreachable http_proxy.
+  * Add patch to not use deprecated distutils module.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 26 Jan 2023 05:22:41 +0100
+
+rasterio (1.3.4-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Drop GDAL 3.6.0 patch, fixed upstream.
+  * Ignore test_warp.py, requires network.
+  * Add patch to fix spelling errors.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 17 Nov 2022 05:29:22 +0100
+
+rasterio (1.3.3-2) unstable; urgency=medium
+
+  * Team upload.
+  * Add patch to fix FTBFS with GDAL 3.6.0.
+    (closes: #1023480)
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sun, 06 Nov 2022 09:52:17 +0100
+
+rasterio (1.3.3-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Use pybuild-plugin-pyproject instead of python3-setuptools.
+  * Drop proj-9.1.0.patch, fixed upstream.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 20 Oct 2022 05:25:50 +0200
+
+rasterio (1.3.2-3) unstable; urgency=medium
+
+  * Team upload.
+  * Add patch to fix FTBFS with PROJ 9.1.0.
+    (closes: #1020074)
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sun, 18 Sep 2022 09:14:30 +0200
+
+rasterio (1.3.2-2) unstable; urgency=medium
+
+  * Team upload.
+  * Ignore test failures on armel & sparc64.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Sat, 20 Aug 2022 06:48:31 +0200
+
+rasterio (1.3.2-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 19 Aug 2022 20:04:55 +0200
+
+rasterio (1.3.1-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Thu, 18 Aug 2022 05:31:52 +0200
+
+rasterio (1.3.0-2) unstable; urgency=medium
+
+  * Team upload.
+  * Skip tests requiring network.
+  * Ignore test failures on certain architectures.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Fri, 08 Jul 2022 11:04:37 +0200
+
+rasterio (1.3.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream release.
+  * Bump Standards-Version to 4.6.1, no changes.
+  * Update repo URL for move from mapbox to rasterio.
+  * Update copyright file.
+  * Refresh patches.
+
+ -- Bas Couwenberg <sebastic@debian.org>  Wed, 06 Jul 2022 05:42:41 +0200
 
 rasterio (1.2.10-1) unstable; urgency=medium
 

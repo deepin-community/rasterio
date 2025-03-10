@@ -1,5 +1,3 @@
-# cython: language_level=3
-
 # GDAL API definitions.
 
 from libc.stdio cimport FILE
@@ -15,6 +13,10 @@ cdef extern from "cpl_conv.h" nogil:
     const char *CPLFindFile(const char *pszClass, const char *pszBasename)
 
 
+cdef extern from "cpl_port.h":
+    ctypedef char **CSLConstList
+
+
 cdef extern from "cpl_error.h" nogil:
 
     ctypedef enum CPLErr:
@@ -25,18 +27,23 @@ cdef extern from "cpl_error.h" nogil:
         CE_Fatal
 
     ctypedef int CPLErrorNum
-
-    # CPLErrorNum eludes me at the moment, I'm calling it 'int'
-    # for now.
     ctypedef void (*CPLErrorHandler)(CPLErr, int, const char*)
 
+    void CPLError(CPLErr eErrClass, CPLErrorNum err_no, const char *template, ...)
     void CPLErrorReset()
     int CPLGetLastErrorNo()
     const char* CPLGetLastErrorMsg()
     CPLErr CPLGetLastErrorType()
+    void *CPLGetErrorHandlerUserData()
     void CPLPushErrorHandler(CPLErrorHandler handler)
+    void CPLPushErrorHandlerEx(CPLErrorHandler handler, void *userdata)
     void CPLPopErrorHandler()
     void CPLQuietErrorHandler(CPLErr eErrClass, CPLErrorNum nError, const char *pszErrorMsg)
+
+
+cdef extern from "cpl_progress.h":
+
+    ctypedef int (*GDALProgressFunc)(double dfComplete, const char *pszMessage, void *pProgressArg)
 
 
 cdef extern from "cpl_string.h" nogil:
@@ -47,6 +54,7 @@ cdef extern from "cpl_string.h" nogil:
                            const char *pszValue)
     char **CSLDuplicate(char **papszStrList)
     int CSLFindName(char **papszStrList, const char *pszName)
+    int CSLFindString(char **papszStrList, const char *pszString)
     int CSLFetchBoolean(char **papszStrList, const char *pszName, int default)
     const char *CSLFetchNameValue(char **papszStrList, const char *pszName)
     char **CSLSetNameValue(char **list, char *name, char *val)
@@ -55,16 +63,68 @@ cdef extern from "cpl_string.h" nogil:
     const char* CPLParseNameValue(const char *pszNameValue, char **ppszKey)
 
 
-cdef extern from "sys/stat.h" nogil:
-    struct stat:
-        pass
-
-
 cdef extern from "cpl_vsi.h" nogil:
 
-    ctypedef int vsi_l_offset
+    ctypedef unsigned long long vsi_l_offset
     ctypedef FILE VSILFILE
-    ctypedef stat VSIStatBufL
+    ctypedef struct VSIStatBufL:
+        long st_size
+        long st_mode
+        int st_mtime
+    ctypedef enum VSIRangeStatus:
+        VSI_RANGE_STATUS_UNKNOWN,
+        VSI_RANGE_STATUS_DATA,
+        VSI_RANGE_STATUS_HOLE,
+
+    # GDAL Plugin System (GDAL 3.0+)
+    # Filesystem functions
+    ctypedef int (*VSIFilesystemPluginStatCallback)(void*, const char*, VSIStatBufL*, int)  # Optional
+    ctypedef int (*VSIFilesystemPluginUnlinkCallback)(void*, const char*)  # Optional
+    ctypedef int (*VSIFilesystemPluginRenameCallback)(void*, const char*, const char*)  # Optional
+    ctypedef int (*VSIFilesystemPluginMkdirCallback)(void*, const char*, long)  # Optional
+    ctypedef int (*VSIFilesystemPluginRmdirCallback)(void*, const char*)  # Optional
+    ctypedef char** (*VSIFilesystemPluginReadDirCallback)(void*, const char*, int)  # Optional
+    ctypedef char** (*VSIFilesystemPluginSiblingFilesCallback)(void*, const char*)  # Optional (GDAL 3.2+)
+    ctypedef void* (*VSIFilesystemPluginOpenCallback)(void*, const char*, const char*)
+    # File functions
+    ctypedef vsi_l_offset (*VSIFilesystemPluginTellCallback)(void*)
+    ctypedef int (*VSIFilesystemPluginSeekCallback)(void*, vsi_l_offset, int)
+    ctypedef size_t (*VSIFilesystemPluginReadCallback)(void*, void*, size_t, size_t)
+    ctypedef int (*VSIFilesystemPluginReadMultiRangeCallback)(void*, int, void**, const vsi_l_offset*, const size_t*)  # Optional
+    ctypedef VSIRangeStatus (*VSIFilesystemPluginGetRangeStatusCallback)(void*, vsi_l_offset, vsi_l_offset)  # Optional
+    ctypedef int (*VSIFilesystemPluginEofCallback)(void*)  # Mandatory?
+    ctypedef size_t (*VSIFilesystemPluginWriteCallback)(void*, const void*, size_t, size_t)
+    ctypedef int (*VSIFilesystemPluginFlushCallback)(void*)  # Optional
+    ctypedef int (*VSIFilesystemPluginTruncateCallback)(void*, vsi_l_offset)
+    ctypedef int (*VSIFilesystemPluginCloseCallback)(void*)  # Optional
+    # Plugin function container struct
+    ctypedef struct VSIFilesystemPluginCallbacksStruct:
+        void *pUserData
+        VSIFilesystemPluginStatCallback stat
+        VSIFilesystemPluginUnlinkCallback unlink
+        VSIFilesystemPluginRenameCallback rename
+        VSIFilesystemPluginMkdirCallback mkdir
+        VSIFilesystemPluginRmdirCallback rmdir
+        VSIFilesystemPluginReadDirCallback read_dir
+        VSIFilesystemPluginOpenCallback open
+        VSIFilesystemPluginTellCallback tell
+        VSIFilesystemPluginSeekCallback seek
+        VSIFilesystemPluginReadCallback read
+        VSIFilesystemPluginReadMultiRangeCallback read_multi_range
+        VSIFilesystemPluginGetRangeStatusCallback get_range_status
+        VSIFilesystemPluginEofCallback eof
+        VSIFilesystemPluginWriteCallback write
+        VSIFilesystemPluginFlushCallback flush
+        VSIFilesystemPluginTruncateCallback truncate
+        VSIFilesystemPluginCloseCallback close
+        size_t nBufferSize
+        size_t nCacheSize
+        VSIFilesystemPluginSiblingFilesCallback sibling_files
+
+    int VSIInstallPluginHandler(const char*, const VSIFilesystemPluginCallbacksStruct*)
+    VSIFilesystemPluginCallbacksStruct* VSIAllocFilesystemPluginCallbacksStruct()
+    void VSIFreeFilesystemPluginCallbacksStruct(VSIFilesystemPluginCallbacksStruct*)
+    char** VSIGetFileSystemsPrefixes()
 
     unsigned char *VSIGetMemFileBuffer(const char *path,
                                        vsi_l_offset *data_len,
@@ -75,7 +135,9 @@ cdef extern from "cpl_vsi.h" nogil:
     int VSIFCloseL(VSILFILE *fp)
     int VSIUnlink(const char *path)
     int VSIMkdir(const char *path, long mode)
+    char** VSIReadDir(const char *path)
     int VSIRmdir(const char *path)
+    int VSIRmdirRecursive(const char *path)
     int VSIFFlushL(VSILFILE *fp)
     size_t VSIFReadL(void *buffer, size_t nSize, size_t nCount, VSILFILE *fp)
     int VSIFSeekL(VSILFILE *fp, vsi_l_offset nOffset, int nWhence)
@@ -84,8 +146,13 @@ cdef extern from "cpl_vsi.h" nogil:
     size_t VSIFWriteL(void *buffer, size_t nSize, size_t nCount, VSILFILE *fp)
     int VSIStatL(const char *pszFilename, VSIStatBufL *psStatBuf)
 
-cdef extern from "ogr_srs_api.h" nogil:
 
+IF (CTE_GDAL_MAJOR_VERSION, CTE_GDAL_MINOR_VERSION) >= (3, 9):
+    cdef extern from "cpl_vsi.h" nogil:
+        int VSIRemovePluginHandler(const char*)
+
+
+cdef extern from "ogr_srs_api.h" nogil:
     ctypedef int OGRErr
     ctypedef void * OGRCoordinateTransformationH
     ctypedef void * OGRSpatialReferenceH
@@ -97,9 +164,6 @@ cdef extern from "ogr_srs_api.h" nogil:
         OGRCoordinateTransformationH source)
     int OCTTransform(OGRCoordinateTransformationH ct, int nCount, double *x,
                      double *y, double *z)
-    int OSRAutoIdentifyEPSG(OGRSpatialReferenceH srs)
-    int OSRMorphFromESRI(OGRSpatialReferenceH srs)
-    int OSRMorphToESRI(OGRSpatialReferenceH srs)
     void OSRCleanup()
     OGRSpatialReferenceH OSRClone(OGRSpatialReferenceH srs)
     int OSRExportToProj4(OGRSpatialReferenceH srs, char **params)
@@ -112,15 +176,46 @@ cdef extern from "ogr_srs_api.h" nogil:
     int OSRIsGeographic(OGRSpatialReferenceH srs)
     int OSRIsProjected(OGRSpatialReferenceH srs)
     int OSRIsSame(OGRSpatialReferenceH srs1, OGRSpatialReferenceH srs2)
+    int OSRIsSameEx(OGRSpatialReferenceH srs1, OGRSpatialReferenceH srs2, const char* const* options)
     OGRSpatialReferenceH OSRNewSpatialReference(const char *wkt)
     void OSRRelease(OGRSpatialReferenceH srs)
     int OSRSetFromUserInput(OGRSpatialReferenceH srs, const char *input)
     OGRErr OSRValidate(OGRSpatialReferenceH srs)
     double OSRGetLinearUnits(OGRSpatialReferenceH srs, char **ppszName)
+    double OSRGetAngularUnits(OGRSpatialReferenceH srs, char **ppszName)
     int OSREPSGTreatsAsLatLong(OGRSpatialReferenceH srs)
     int OSREPSGTreatsAsNorthingEasting(OGRSpatialReferenceH srs)
     OGRSpatialReferenceH *OSRFindMatches(OGRSpatialReferenceH srs, char **options, int *entries, int **matchConfidence)
     void OSRFreeSRSArray(OGRSpatialReferenceH *srs)
+    ctypedef enum OSRAxisMappingStrategy:
+        OAMS_TRADITIONAL_GIS_ORDER
+
+    const char* OSRGetName(OGRSpatialReferenceH hSRS)
+    void OSRSetAxisMappingStrategy(OGRSpatialReferenceH hSRS, OSRAxisMappingStrategy)
+    void OSRSetPROJSearchPaths(const char *const *papszPaths)
+    char ** OSRGetPROJSearchPaths()
+    OGRErr OSRExportToWktEx(OGRSpatialReferenceH, char ** ppszResult,
+                            const char* const* papszOptions)
+    OGRErr OSRExportToPROJJSON(OGRSpatialReferenceH hSRS,
+                                char ** ppszReturn,
+                                const char* const* papszOptions)
+
+
+IF (CTE_GDAL_MAJOR_VERSION, CTE_GDAL_MINOR_VERSION) >= (3, 4):
+    cdef extern from "ogr_srs_api.h" nogil:
+
+        int OCTTransformBounds(
+            OGRCoordinateTransformationH hCT,
+            const double xmin,
+            const double ymin,
+            const double xmax,
+            const double ymax,
+            double* out_xmin,
+            double* out_ymin,
+            double* out_xmax,
+            double* out_ymax,
+            const int densify_pts )
+
 
 cdef extern from "gdal.h" nogil:
 
@@ -138,10 +233,13 @@ cdef extern from "gdal.h" nogil:
     ctypedef enum GDALDataType:
         GDT_Unknown
         GDT_Byte
+        GDT_Int8
         GDT_UInt16
         GDT_Int16
         GDT_UInt32
         GDT_Int32
+        GDT_UInt64
+        GDT_Int64
         GDT_Float32
         GDT_Float64
         GDT_CInt16
@@ -168,22 +266,70 @@ cdef extern from "gdal.h" nogil:
         GRIORA_Mode
         GRIORA_Gauss
 
-    ctypedef enum GDALColorInterp:
-        GCI_Undefined
-        GCI_GrayIndex
-        GCI_PaletteIndex
-        GCI_RedBand
-        GCI_GreenBand
-        GCI_BlueBand
-        GCI_AlphaBand
-        GCI_HueBand
-        GCI_SaturationBand
-        GCI_LightnessBand
-        GCI_CyanBand
-        GCI_YCbCr_YBand
-        GCI_YCbCr_CbBand
-        GCI_YCbCr_CrBand
-        GCI_Max
+
+IF (CTE_GDAL_MAJOR_VERSION, CTE_GDAL_MINOR_VERSION) >= (3, 10):
+    cdef extern from "gdal.h" nogil:
+
+        ctypedef enum GDALColorInterp:
+            GCI_Undefined
+            GCI_GrayIndex
+            GCI_PaletteIndex
+            GCI_RedBand
+            GCI_GreenBand
+            GCI_BlueBand
+            GCI_AlphaBand
+            GCI_HueBand
+            GCI_SaturationBand
+            GCI_LightnessBand
+            GCI_CyanBand
+            GCI_YCbCr_YBand
+            GCI_YCbCr_CbBand
+            GCI_YCbCr_CrBand
+            GCI_PanBand
+            GCI_CoastalBand
+            GCI_RedEdgeBand
+            GCI_NIRBand
+            GCI_SWIRBand
+            GCI_MWIRBand
+            GCI_LWIRBand
+            GCI_TIRBand
+            GCI_OtherIRBand
+            GCI_IR_Reserved_1
+            GCI_IR_Reserved_2
+            GCI_IR_Reserved_3
+            GCI_IR_Reserved_4
+            GCI_SAR_Ka_Band
+            GCI_SAR_K_Band
+            GCI_SAR_Ku_Band
+            GCI_SAR_X_Band
+            GCI_SAR_C_Band
+            GCI_SAR_S_Band
+            GCI_SAR_L_Band
+            GCI_SAR_P_Band
+            GCI_SAR_Reserved_1
+            GCI_SAR_Reserved_2
+            GCI_Max
+ELSE:
+    cdef extern from "gdal.h" nogil:
+
+        ctypedef enum GDALColorInterp:
+            GCI_Undefined
+            GCI_GrayIndex
+            GCI_PaletteIndex
+            GCI_RedBand
+            GCI_GreenBand
+            GCI_BlueBand
+            GCI_AlphaBand
+            GCI_HueBand
+            GCI_SaturationBand
+            GCI_LightnessBand
+            GCI_CyanBand
+            GCI_YCbCr_YBand
+            GCI_YCbCr_CbBand
+            GCI_YCbCr_CrBand
+
+
+cdef extern from "gdal.h" nogil:
 
     ctypedef struct GDALColorEntry:
         short c1
@@ -234,6 +380,7 @@ cdef extern from "gdal.h" nogil:
     void GDALSetDescription(GDALMajorObjectH obj, const char *text)
     GDALDriverH GDALGetDriverByName(const char *name)
     GDALDatasetH GDALOpen(const char *filename, GDALAccess access) # except -1
+    GDALDatasetH GDALOpenEx(const char *filename, int flags, const char **allowed_drivers, const char **options, const char **siblings) # except -1
     GDALDatasetH GDALOpenShared(const char *filename, GDALAccess access) # except -1
     void GDALFlushCache(GDALDatasetH hds)
     void GDALClose(GDALDatasetH hds)
@@ -255,13 +402,32 @@ cdef extern from "gdal.h" nogil:
     int GDALGetRasterDataType(GDALRasterBandH band)
     double GDALGetRasterNoDataValue(GDALRasterBandH band, int *success)
     int GDALSetRasterNoDataValue(GDALRasterBandH band, double value)
+    int GDALDeleteRasterNoDataValue(GDALRasterBandH hBand)
     int GDALDatasetRasterIO(GDALRasterBandH band, int, int xoff, int yoff,
                             int xsize, int ysize, void *buffer, int width,
                             int height, int, int count, int *bmap, int poff,
                             int loff, int boff)
+    CPLErr GDALDatasetRasterIOEx(GDALDatasetH hDS, GDALRWFlag eRWFlag, int nDSXOff, int nDSYOff, int nDSXSize, int nDSYSize, void *pBuffer, int nBXSize, int nBYSize, GDALDataType eBDataType, int nBandCount, int *panBandCount, GSpacing nPixelSpace, GSpacing nLineSpace, GSpacing nBandSpace, GDALRasterIOExtraArg *psExtraArg)
     int GDALRasterIO(GDALRasterBandH band, int, int xoff, int yoff, int xsize,
                      int ysize, void *buffer, int width, int height, int,
                      int poff, int loff)
+    CPLErr GDALGetRasterStatistics(GDALRasterBandH band, int approx, int force, double *min, double *max, double *mean, double *std)
+    void GDALDatasetClearStatistics(GDALDatasetH hDS)
+    CPLErr GDALComputeRasterStatistics(GDALRasterBandH band, int approx, double *min, double *max, double *mean, double *std, void *, void *)
+    CPLErr GDALSetRasterStatistics(GDALRasterBandH band, double min, double max, double mean, double std)
+    ctypedef struct GDALRasterIOExtraArg:
+        int nVersion
+        GDALRIOResampleAlg eResampleAlg
+        GDALProgressFunc pfnProgress
+        void *pProgressData
+        int bFloatingPointWindowValidity
+        double dfXOff
+        double dfYOff
+        double dfXSize
+        double dfYSize
+
+    CPLErr GDALRasterIOEx(GDALRasterBandH hRBand, GDALRWFlag eRWFlag, int nDSXOff, int nDSYOff, int nDSXSize, int nDSYSize, void *pBuffer, int nBXSize, int nBYSize, GDALDataType eBDataType, GSpacing nPixelSpace, GSpacing nLineSpace, GDALRasterIOExtraArg *psExtraArg)
+
     int GDALFillRaster(GDALRasterBandH band, double rvalue, double ivalue)
     GDALDatasetH GDALCreate(GDALDriverH driver, const char *path, int width,
                             int height, int nbands, GDALDataType dtype,
@@ -296,9 +462,6 @@ cdef extern from "gdal.h" nogil:
                            int nOverviews, int *overviews, int nBands,
                            int *bands, void *progress_func,
                            void *progress_data)
-    int GDALCheckVersion(int nVersionMajor, int nVersionMinor,
-                         const char *pszCallingComponentName)
-    const char* GDALVersionInfo(const char *pszRequest)
     CPLErr GDALSetGCPs(GDALDatasetH hDS, int nGCPCount, const GDAL_GCP *pasGCPList,
                        const char *pszGCPProjection)
     const GDAL_GCP *GDALGetGCPs(GDALDatasetH hDS)
@@ -334,8 +497,6 @@ cdef extern from "ogr_api.h" nogil:
     ctypedef void * OGRFeatureDefnH
     ctypedef void * OGRFeatureH
     ctypedef void * OGRGeometryH
-
-    ctypedef int OGRErr
 
     ctypedef struct OGREnvelope:
         double MinX
@@ -526,7 +687,27 @@ cdef extern from "gdalwarper.h" nogil:
          double *padfGeoTransform, const GDALWarpOptions *psOptionsIn)
 
 
+IF (CTE_GDAL_MAJOR_VERSION, CTE_GDAL_MINOR_VERSION) >= (3, 2):
+    cdef extern from "gdalwarper.h" nogil:
+
+        GDALDatasetH GDALAutoCreateWarpedVRTEx(
+            GDALDatasetH hSrcDS, const char *pszSrcWKT, const char *pszDstWKT,
+            GDALResampleAlg eResampleAlg, double dfMaxError,
+            const GDALWarpOptions *psOptions, char** papszTransformerOptions)
+
+
+
 cdef extern from "gdal_alg.h" nogil:
+    void *GDALCreateGCPTransformer( int nGCPCount, const GDAL_GCP *pasGCPList,
+                          int nReqOrder, int bReversed)
+    void *GDALDestroyGCPTransformer( void *pTransformArg)
+    int GDALGCPTransform( void *pTransformArg, int bDstToSrc, int nPointCount,
+                          double *x, double *y, double *z, int *panSuccess)
+    void *GDALCreateTPSTransformer( int nGCPCount, const GDAL_GCP *pasGCPList,
+                          int bReversed)
+    void *GDALDestroyTPSTransformer( void *pTransformArg)
+    int GDALTPSTransform( void *pTransformArg, int bDstToSrc, int nPointCount,
+                          double *x, double *y, double *z, int *panSuccess)
     void *GDALCreateRPCTransformer( GDALRPCInfo *psRPC, int bReversed,
                           double dfPixErrThreshold,
                           char **papszOptions )

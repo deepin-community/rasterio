@@ -1,8 +1,4 @@
-# cython: language_level=3
-
 """Feature extraction"""
-
-include "gdal.pxi"
 
 import logging
 
@@ -13,7 +9,8 @@ from rasterio.dtypes import _getnpdtype
 from rasterio.enums import MergeAlg
 
 from rasterio._err cimport exc_wrap_int, exc_wrap_pointer
-from rasterio._io cimport DatasetReaderBase, InMemoryRaster, io_auto
+from rasterio._io cimport DatasetReaderBase, DatasetWriterBase, MemoryDataset, io_auto
+from rasterio.env import GDALVersion
 
 
 log = logging.getLogger(__name__)
@@ -27,9 +24,9 @@ def _shapes(image, mask, connectivity, transform):
     Parameters
     ----------
     image : array or dataset object opened in 'r' mode or Band or tuple(dataset, bidx)
-        Data type must be one of rasterio.int16, rasterio.int32,
-        rasterio.uint8, rasterio.uint16, or rasterio.float32.
-    mask : numpy ndarray or rasterio Band object
+        Data type must be one of rasterio.int8, rasterio.int16, rasterio.int32,
+        rasterio.uint8, rasterio.uint16, rasterio.float32, or rasterio.float64.
+    mask : numpy.ndarray or rasterio Band object
         Values of False or 0 will be excluded from feature generation
         Must evaluate to bool (rasterio.bool_ or rasterio.uint8)
     connectivity : int
@@ -58,15 +55,17 @@ def _shapes(image, mask, connectivity, transform):
     cdef OGRLayerH layer = NULL
     cdef OGRFieldDefnH fielddefn = NULL
     cdef char **options = NULL
-    cdef InMemoryRaster mem_ds = None
-    cdef InMemoryRaster mask_ds = None
+    cdef MemoryDataset mem_ds = None
+    cdef MemoryDataset mask_ds = None
     cdef ShapeIterator shape_iter = None
     cdef int fieldtp
 
     is_float = _getnpdtype(image.dtype).kind == "f"
     fieldtp = 2 if is_float else 0
 
-    valid_dtypes = ('int16', 'int32', 'uint8', 'uint16', 'float32')
+    valid_dtypes = ("int16", "int32", "uint8", "uint16", "float32", "float64")
+    if GDALVersion.runtime().at_least("3.7"):
+        valid_dtypes += ("int8",)
 
     if _getnpdtype(image.dtype).name not in valid_dtypes:
         raise ValueError("image dtype must be one of: {0}".format(
@@ -78,7 +77,7 @@ def _shapes(image, mask, connectivity, transform):
     try:
 
         if dtypes.is_ndarray(image):
-            mem_ds = InMemoryRaster(image=image, transform=transform)
+            mem_ds = MemoryDataset(image, transform=transform)
             band = mem_ds.band(1)
         elif isinstance(image, tuple):
             rdr = image.ds
@@ -96,7 +95,7 @@ def _shapes(image, mask, connectivity, transform):
 
             if dtypes.is_ndarray(mask):
                 # A boolean mask must be converted to uint8 for GDAL
-                mask_ds = InMemoryRaster(image=mask.astype('uint8'),
+                mask_ds = MemoryDataset(mask.astype('uint8'),
                                          transform=transform)
                 maskband = mask_ds.band(1)
             elif isinstance(mask, tuple):
@@ -152,20 +151,20 @@ def _shapes(image, mask, connectivity, transform):
 
 
 def _sieve(image, size, out, mask, connectivity):
-    """
-    Replaces small polygons in `image` with the value of their largest
-    neighbor.  Polygons are found for each set of neighboring pixels of the
-    same value.
+    """Remove small polygon regions from a raster.
 
     Parameters
     ----------
-    image : array or dataset object opened in 'r' mode or Band or tuple(dataset, bidx)
-        Must be of type rasterio.int16, rasterio.int32, rasterio.uint8,
-        rasterio.uint16, or rasterio.float32.
+    image : ndarray or Band
+        The source is a 2 or 3-D ndarray, or a single or a multiple
+        Rasterio Band object.  Must be of type rasterio.int16,
+        rasterio.int32, rasterio.uint8, rasterio.uint16, or
+        rasterio.float32
     size : int
         minimum polygon size (number of pixels) to retain.
     out : numpy ndarray
-        Array of same shape and data type as `image` in which to store results.
+        Array of same shape and data type as `image` in which to store
+        results.
     mask : numpy ndarray or rasterio Band object
         Values of False or 0 will be excluded from feature generation.
         Must evaluate to bool (rasterio.bool_ or rasterio.uint8)
@@ -176,9 +175,9 @@ def _sieve(image, size, out, mask, connectivity):
     cdef int retval
     cdef int rows
     cdef int cols
-    cdef InMemoryRaster in_mem_ds = None
-    cdef InMemoryRaster out_mem_ds = None
-    cdef InMemoryRaster mask_mem_ds = None
+    cdef MemoryDataset in_mem_ds = None
+    cdef MemoryDataset out_mem_ds = None
+    cdef MemoryDataset mask_mem_ds = None
     cdef GDALRasterBandH in_band = NULL
     cdef GDALRasterBandH out_band = NULL
     cdef GDALRasterBandH mask_band = NULL
@@ -186,8 +185,7 @@ def _sieve(image, size, out, mask, connectivity):
     valid_dtypes = ('int16', 'int32', 'uint8', 'uint16')
 
     if _getnpdtype(image.dtype).name not in valid_dtypes:
-        valid_types_str = ', '.join(('rasterio.{0}'.format(t) for t
-                                     in valid_dtypes))
+        valid_types_str = ', '.join(('rasterio.{0}'.format(t) for t in valid_dtypes))
         raise ValueError(
             "image dtype must be one of: {0}".format(valid_types_str))
 
@@ -210,26 +208,40 @@ def _sieve(image, size, out, mask, connectivity):
     try:
 
         if dtypes.is_ndarray(image):
-            in_mem_ds = InMemoryRaster(image=image)
-            in_band = in_mem_ds.band(1)
+            if len(image.shape) == 2:
+                image = image.reshape(1, *image.shape)
+            src_count = image.shape[0]
+            src_bidx = list(range(1, src_count + 1))
+            in_mem_ds = MemoryDataset(image)
+            src_dataset = in_mem_ds
+
         elif isinstance(image, tuple):
-            rdr = image.ds
-            in_band = (<DatasetReaderBase?>rdr).band(image.bidx)
+            src_dataset, src_bidx, dtype, shape = image
+            if isinstance(src_bidx, int):
+                src_bidx = [src_bidx]
+
         else:
             raise ValueError("Invalid source image")
 
         if dtypes.is_ndarray(out):
             log.debug("out array: %r", out)
-            out_mem_ds = InMemoryRaster(image=out)
-            out_band = out_mem_ds.band(1)
+            if len(out.shape) == 2:
+                out = out.reshape(1, *out.shape)
+            dst_count = out.shape[0]
+            dst_bidx = list(range(1, dst_count + 1))
+            out_mem_ds = MemoryDataset(out)
+            dst_dataset = out_mem_ds
+
         elif isinstance(out, tuple):
-            udr = out.ds
-            out_band = (<DatasetReaderBase?>udr).band(out.bidx)
+            dst_dataset, dst_bidx, _, _ = out
+            if isinstance(dst_bidx, int):
+                dst_bidx = [dst_bidx]
+
         else:
             raise ValueError("Invalid out image")
 
         if mask is not None:
-            if mask.shape != image.shape:
+            if mask.shape != image.shape[-2:]:
                 raise ValueError("Mask must have same shape as image")
 
             if _getnpdtype(mask.dtype) not in ('bool', 'uint8'):
@@ -238,19 +250,18 @@ def _sieve(image, size, out, mask, connectivity):
 
             if dtypes.is_ndarray(mask):
                 # A boolean mask must be converted to uint8 for GDAL
-                mask_mem_ds = InMemoryRaster(image=mask.astype('uint8'))
+                mask_mem_ds = MemoryDataset(mask.astype('uint8'))
                 mask_band = mask_mem_ds.band(1)
 
             elif isinstance(mask, tuple):
                 mask_reader = mask.ds
                 mask_band = (<DatasetReaderBase?>mask_reader).band(mask.bidx)
 
-        GDALSieveFilter(in_band, mask_band, out_band, size, connectivity,
-                              NULL, NULL, NULL)
-
-    else:
-        # Read from out_band into out
-        io_auto(out, out_band, False)
+        for i, j in zip(src_bidx, dst_bidx):
+            in_band = (<DatasetReaderBase?>src_dataset).band(i)
+            out_band = (<DatasetReaderBase?>dst_dataset).band(j)
+            GDALSieveFilter(in_band, mask_band, out_band, size, connectivity, NULL, NULL, NULL)
+            io_auto(out[i - 1], out_band, False)
 
     finally:
         if in_mem_ds is not None:
@@ -260,10 +271,14 @@ def _sieve(image, size, out, mask, connectivity):
         if mask_mem_ds is not None:
             mask_mem_ds.close()
 
+    if out.shape[0] == 1:
+        out = out[0]
+
+    return out
+
 
 def _rasterize(shapes, image, transform, all_touched, merge_alg):
-    """
-    Burns input geometries into `image`.
+    """Burns input geometries into `image`.
 
     The `image` array is modified in place.
 
@@ -271,7 +286,7 @@ def _rasterize(shapes, image, transform, all_touched, merge_alg):
     ----------
     shapes : iterable of (geometry, value) pairs
         `geometry` is a GeoJSON-like object.
-    image : numpy ndarray
+    image : numpy.ndarray or open dataset object
         Array in which to store results.
     transform : Affine transformation object, optional
         Transformation from pixel coordinates of `image` to the
@@ -318,12 +333,13 @@ def _rasterize(shapes, image, transform, all_touched, merge_alg):
 
     """
     cdef int retval
-    cdef size_t i
+    cdef int i
     cdef size_t num_geoms = 0
     cdef OGRGeometryH *geoms = NULL
     cdef char **options = NULL
     cdef double *pixel_values = NULL
-    cdef InMemoryRaster mem = None
+    cdef MemoryDataset mem = None
+    cdef int *band_ids = NULL
 
     try:
         if all_touched:
@@ -341,31 +357,47 @@ def _rasterize(shapes, image, transform, all_touched, merge_alg):
             num_geoms * sizeof(OGRGeometryH))
         pixel_values = <double *>CPLMalloc(num_geoms * sizeof(double))
 
+        # initialize all geoms to NULL
+        for i in range(<int>num_geoms):
+            geoms[i] = NULL
+
         for i, (geometry, value) in enumerate(all_shapes):
             try:
                 geoms[i] = OGRGeomBuilder().build(geometry)
                 pixel_values[i] = <double>value
-            except:
-                log.error("Geometry %r at index %d with value %d skipped",
-                    geometry, i, value)
+            except Exception as error:
+                log.error(
+                    "Geometry %r at index %d with value %d skipped due to error: %r",
+                    geometry, i, value, error
+                )
 
-        # TODO: is a vsimem file more memory efficient?
-        with InMemoryRaster(image=image, transform=transform) as mem:
+        if isinstance(image, DatasetWriterBase):
+            band_ids = <int *>CPLMalloc(<int>image.count*sizeof(int))
+            for i in range(<int>image.count):
+                band_ids[i] = i + 1
             exc_wrap_int(
                 GDALRasterizeGeometries(
-                    mem.handle(), 1, mem.band_ids, num_geoms, geoms, NULL,
+                    <GDALDatasetH>((<DatasetWriterBase>image)._hds), 1, band_ids, num_geoms, geoms, NULL,
                     NULL, pixel_values, options, NULL, NULL))
-
-            # Read in-memory data back into image
-            image = mem.read()
+        else:
+            # TODO: is a vsimem file more memory efficient?
+            with MemoryDataset(image, transform=transform) as mem:
+                band_ids = <int *>CPLMalloc(<int>mem.count*sizeof(int))
+                for i in range(<int>mem.count):
+                    band_ids[i] = i + 1
+                exc_wrap_int(
+                    GDALRasterizeGeometries(
+                        mem.handle(), 1, band_ids, num_geoms, geoms, NULL,
+                        NULL, pixel_values, options, NULL, NULL))
 
     finally:
-        for i in range(num_geoms):
-            _deleteOgrGeom(geoms[i])
+        if geoms != NULL:
+            for i in range(<int>num_geoms):
+                _deleteOgrGeom(geoms[i])
         CPLFree(geoms)
         CPLFree(pixel_values)
-        if options:
-            CSLDestroy(options)
+        CPLFree(band_ids)
+        CSLDestroy(options)
 
 
 def _explode(coords):
@@ -393,35 +425,17 @@ def _bounds(geometry, north_up=True, transform=None):
     TODO: add to Fiona.
     """
 
-    if 'features' in geometry:
-        # Input is a FeatureCollection
-        xmins = []
-        ymins = []
-        xmaxs = []
-        ymaxs = []
-        for feature in geometry['features']:
-            xmin, ymin, xmax, ymax = _bounds(feature['geometry'])
-            xmins.append(xmin)
-            ymins.append(ymin)
-            xmaxs.append(xmax)
-            ymaxs.append(ymax)
+    if 'features' in geometry and geometry["features"]:
+        xmins, ymins, xmaxs, ymaxs = zip(
+            *[_bounds(feat["geometry"]) for feat in geometry["features"]]
+        )
         if north_up:
             return min(xmins), min(ymins), max(xmaxs), max(ymaxs)
         else:
             return min(xmins), max(ymaxs), max(xmaxs), min(ymins)
 
-    elif 'geometries' in geometry:
-        # Input is a geometry collection
-        xmins = []
-        ymins = []
-        xmaxs = []
-        ymaxs = []
-        for geometry in geometry['geometries']:
-            xmin, ymin, xmax, ymax = _bounds(geometry)
-            xmins.append(xmin)
-            ymins.append(ymin)
-            xmaxs.append(xmax)
-            ymaxs.append(ymax)
+    elif 'geometries' in geometry and geometry['geometries']:
+        xmins, ymins, xmaxs, ymaxs = zip(*[_bounds(geom) for geom in geometry["geometries"]])
         if north_up:
             return min(xmins), min(ymins), max(xmaxs), max(ymaxs)
         else:
@@ -431,7 +445,9 @@ def _bounds(geometry, north_up=True, transform=None):
         # Input is a singular geometry object
         if transform is not None:
             xyz = list(_explode(geometry['coordinates']))
-            xyz_px = [transform * point for point in xyz]
+            # Because the affine transform matrix only applies in 2D we
+            # must slice away any possible Z coordinate from a point.
+            xyz_px = [transform * point[:2] for point in xyz]
             xyz = tuple(zip(*xyz_px))
             return min(xyz[0]), max(xyz[1]), max(xyz[0]), min(xyz[1])
         else:
@@ -543,6 +559,10 @@ cdef class GeomBuilder:
         coordinates = [p['coordinates'] for p in self._buildParts(self.geom)]
         return {'type': 'MultiPolygon', 'coordinates': coordinates}
 
+    cpdef _buildGeometryCollection(self):
+        geometries = [geom for geom in self._buildParts(self.geom)]
+        return {'type': 'GeometryCollection', 'geometries': geometries}
+
     cdef build(self, OGRGeometryH geom):
         """Builds a GeoJSON object from an OGR geometry object."""
         if geom == NULL:
@@ -553,13 +573,16 @@ cdef class GeomBuilder:
         self.ndims = OGR_G_GetCoordinateDimension(geom)
         self.geom = geom
 
-        return getattr(self, '_build' + self.geomtypename)()
+        try:
+            return getattr(self, '_build' + self.geomtypename)()
+        except AttributeError:
+            raise ValueError(f"Unsupported geometry type {self.geomtypename}")
 
 
 cdef class OGRGeomBuilder:
     """
     Builds an OGR geometry from GeoJSON geometry.
-    From Fiona: https://github.com/Toblerity/Fiona/blob/master/src/fiona/ogrext.pyx
+    From Fiona: https://github.com/Toblerity/Fiona/blob/master/fiona/ogrext.pyx
     """
 
     cdef OGRGeometryH _createOgrGeometry(self, int geom_type) except NULL:
@@ -635,7 +658,7 @@ cdef class OGRGeomBuilder:
             OGR_G_AddGeometryDirectly(geom, part)
         return geom
 
-    cdef OGRGeometryH _buildGeomCollection(self, object geoms) except NULL:
+    cdef OGRGeometryH _buildGeometryCollection(self, object geoms) except NULL:
         cdef OGRGeometryH part = NULL
         cdef OGRGeometryH ogr_geom = self._createOgrGeometry(
             GEOJSON2OGR_GEOMETRY_TYPES['GeometryCollection'])
@@ -682,7 +705,7 @@ cdef class OGRGeomBuilder:
             if not (geometries and len(geometries) > 0):
                 raise ValueError("Input is not a valid geometry object")
 
-            return self._buildGeomCollection(geometries)
+            return self._buildGeometryCollection(geometries)
 
         else:
             raise ValueError("Unsupported geometry type %s" % typename)

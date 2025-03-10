@@ -2,18 +2,15 @@
 
 import xml.etree.ElementTree as ET
 
-import rasterio
 from rasterio._warp import WarpedVRTReaderBase
 from rasterio.dtypes import _gdal_typename
-from rasterio.enums import MaskFlags
-from rasterio.env import env_ctx_if_needed
-from rasterio.path import parse_path
+from rasterio.enums import MaskFlags, Resampling
+from rasterio._path import _parse_path
 from rasterio.transform import TransformMethodsMixin
 from rasterio.windows import WindowMethodsMixin
 
 
-class WarpedVRT(WarpedVRTReaderBase, WindowMethodsMixin,
-                TransformMethodsMixin):
+class WarpedVRT(WarpedVRTReaderBase, WindowMethodsMixin, TransformMethodsMixin):
     """A virtual warped dataset.
 
     Abstracts the details of raster warping and allows access to data
@@ -27,26 +24,26 @@ class WarpedVRT(WarpedVRTReaderBase, WindowMethodsMixin,
         The warp source.
     src_crs : CRS or str, optional
         Overrides the coordinate reference system of `src_dataset`.
-    src_transfrom : Affine, optional
+    src_transform : Affine, optional
         Overrides the transform of `src_dataset`.
     src_nodata : float, optional
         Overrides the nodata value of `src_dataset`, which is the
         default.
     crs : CRS or str, optional
         The coordinate reference system at the end of the warp
-        operation.  Default: the crs of `src_dataset`. dst_crs is
+        operation.  Default: the crs of `src_dataset`. dst_crs was
         a deprecated alias for this parameter.
     transform : Affine, optional
         The transform for the virtual dataset. Default: will be
         computed from the attributes of `src_dataset`. dst_transform
-        is a deprecated alias for this parameter.
+        was a deprecated alias for this parameter.
     height, width: int, optional
         The dimensions of the virtual dataset. Defaults: will be
         computed from the attributes of `src_dataset`. dst_height
-        and dst_width are deprecated alias for these parameters.
+        and dst_width were deprecated alias for these parameters.
     nodata : float, optional
         Nodata value for the virtual dataset. Default: the nodata
-        value of `src_dataset` or 0.0. dst_nodata is a deprecated
+        value of `src_dataset` or 0.0. dst_nodata was a deprecated
         alias for this parameter.
     resampling : Resampling, optional
         Warp resampling algorithm. Default: `Resampling.nearest`.
@@ -56,6 +53,8 @@ class WarpedVRT(WarpedVRTReaderBase, WindowMethodsMixin,
         or one-eigth of a pixel.
     src_alpha : int, optional
         Index of a source band to use as an alpha band for warping.
+    dst_alpha : int, optional
+        Index of a destination band to use as an alpha band for warping.
     add_alpha : bool, optional
         Whether to add an alpha masking band to the virtual dataset.
         Default: False. This option will cause deletion of the VRT
@@ -110,22 +109,29 @@ class WarpedVRT(WarpedVRTReaderBase, WindowMethodsMixin,
             self.closed and 'closed' or 'open', self.name, self.mode)
 
     def __enter__(self):
-        self._env = env_ctx_if_needed()
-        self._env.__enter__()
         self.start()
         return self
 
     def __exit__(self, *args, **kwargs):
-        self._env.__exit__()
-        self.close()
+        if not self._closed:
+            self.close()
 
     def __del__(self):
-        self.close()
+        if not self._closed:
+            self.close()
 
 
 def _boundless_vrt_doc(
-        src_dataset, nodata=None, background=None, hidenodata=False,
-        width=None, height=None, transform=None, masked=False):
+    src_dataset,
+    nodata=None,
+    background=None,
+    hidenodata=False,
+    width=None,
+    height=None,
+    transform=None,
+    masked=False,
+    resampling=Resampling.nearest,
+):
     """Make a VRT XML document.
 
     Parameters
@@ -142,8 +148,7 @@ def _boundless_vrt_doc(
     str
         An XML text string.
     """
-
-    nodata = nodata or src_dataset.nodata
+    nodata = nodata if nodata is not None else src_dataset.nodata
     width = width or src_dataset.width
     height = height or src_dataset.height
     transform = transform or src_dataset.transform
@@ -156,10 +161,15 @@ def _boundless_vrt_doc(
     geotransform = ET.SubElement(vrtdataset, 'GeoTransform')
     geotransform.text = ','.join([str(v) for v in transform.to_gdal()])
 
-    for bidx, ci, block_shape, dtype in zip(src_dataset.indexes, src_dataset.colorinterp, src_dataset.block_shapes, src_dataset.dtypes):
-        vrtrasterband = ET.SubElement(vrtdataset, 'VRTRasterBand')
-        vrtrasterband.attrib['dataType'] = _gdal_typename(dtype)
-        vrtrasterband.attrib['band'] = str(bidx)
+    for bidx, ci, block_shape, dtype in zip(
+        src_dataset.indexes,
+        src_dataset.colorinterp,
+        src_dataset.block_shapes,
+        src_dataset.dtypes,
+    ):
+        vrtrasterband = ET.SubElement(vrtdataset, "VRTRasterBand")
+        vrtrasterband.attrib["dataType"] = _gdal_typename(dtype)
+        vrtrasterband.attrib["band"] = str(bidx)
 
         if background is not None or nodata is not None:
             nodatavalue = ET.SubElement(vrtrasterband, 'NoDataValue')
@@ -173,10 +183,11 @@ def _boundless_vrt_doc(
         colorinterp.text = ci.name.capitalize()
 
         complexsource = ET.SubElement(vrtrasterband, 'ComplexSource')
+        complexsource.attrib["resampling"] = resampling.name.replace("_", "")
         sourcefilename = ET.SubElement(complexsource, 'SourceFilename')
         sourcefilename.attrib['relativeToVRT'] = "0"
         sourcefilename.attrib["shared"] = "0"
-        sourcefilename.text = parse_path(src_dataset.name).as_vsi()
+        sourcefilename.text = _parse_path(src_dataset.name).as_vsi()
         sourceband = ET.SubElement(complexsource, 'SourceBand')
         sourceband.text = str(bidx)
         sourceproperties = ET.SubElement(complexsource, 'SourceProperties')
@@ -196,9 +207,9 @@ def _boundless_vrt_doc(
         dstrect.attrib['xSize'] = str(src_dataset.width * src_dataset.transform.a / transform.a)
         dstrect.attrib['ySize'] = str(src_dataset.height * src_dataset.transform.e / transform.e)
 
-        if src_dataset.nodata is not None:
+        if nodata is not None:
             nodata_elem = ET.SubElement(complexsource, 'NODATA')
-            nodata_elem.text = str(src_dataset.nodata)
+            nodata_elem.text = str(nodata)
 
         if src_dataset.options is not None:
             openoptions = ET.SubElement(complexsource, 'OpenOptions')
@@ -225,7 +236,7 @@ def _boundless_vrt_doc(
         sourcefilename = ET.SubElement(simplesource, 'SourceFilename')
         sourcefilename.attrib['relativeToVRT'] = "0"
         sourcefilename.attrib["shared"] = "0"
-        sourcefilename.text = parse_path(src_dataset.name).as_vsi()
+        sourcefilename.text = _parse_path(src_dataset.name).as_vsi()
 
         sourceband = ET.SubElement(simplesource, 'SourceBand')
         sourceband.text = 'mask,1'

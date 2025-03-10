@@ -1,0 +1,6 @@
+*-info/
+.coverage
+gdal-config.txt
+VERSION.txt
+rasterio/*.c
+rasterio/_*.cpp

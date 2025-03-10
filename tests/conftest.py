@@ -1,6 +1,5 @@
 """``pytest`` fixtures."""
 
-
 import functools
 import operator
 import os
@@ -10,21 +9,33 @@ import uuid
 import zipfile
 
 import affine
-from click.testing import CliRunner
-import pytest
+import boto3
 import numpy as np
+import pytest
+from click.testing import CliRunner
 
 import rasterio
+import rasterio.env
+from rasterio.coords import BoundingBox
 from rasterio.crs import CRS
 from rasterio.enums import ColorInterp
 from rasterio.env import GDALVersion
-
+from affine import Affine
 
 DEFAULT_SHAPE = (10, 10)
 
 
-if sys.version_info > (3,):
-    reduce = functools.reduce
+reduce = functools.reduce
+
+try:
+    have_credentials = boto3.Session().get_credentials()
+except Exception:
+    have_credentials = False
+
+credentials = pytest.mark.skipif(
+    not(have_credentials),
+    reason="S3 raster access requires credentials")
+
 
 test_files = [os.path.join(os.path.dirname(__file__), p) for p in [
     'data/RGB.byte.tif', 'data/float.tif', 'data/float32.tif',
@@ -65,14 +76,14 @@ def red_green(tmpdir):
 
 @pytest.fixture
 def basic_geometry():
-    """
+    """A Polygon with 2D coordinates.
+
     Returns
     -------
-
-    dict: GeoJSON-style geometry object.
+    dict : GeoJSON-style geometry object.
         Coordinates are in grid coordinates (Affine.identity()).
-    """
 
+    """
     return {
         'type': 'Polygon',
         'coordinates': [[(2, 2), (2, 4.25), (4.25, 4.25), (4.25, 2), (2, 2)]]
@@ -80,15 +91,33 @@ def basic_geometry():
 
 
 @pytest.fixture
-def rotation_geometry():
-    """
+def basic_geometry_3d():
+    """A Polygon with 3D coordinates.
+
     Returns
     -------
-
-    dict: GeoJSON-style geometry object.
+    dict : GeoJSON-style geometry object.
         Coordinates are in grid coordinates (Affine.identity()).
-    """
 
+    """
+    return {
+        "type": "Polygon",
+        "coordinates": [
+            [(2, 2, 0), (2, 4.25, 0), (4.25, 4.25, 0), (4.25, 2, 0), (2, 2, 0)]
+        ],
+    }
+
+
+@pytest.fixture
+def rotation_geometry():
+    """A rotated geometry.
+
+    Returns
+    -------
+    dict : GeoJSON-style geometry object.
+        Coordinates are in grid coordinates (Affine.identity()).
+
+    """
     return {
         'type': 'Polygon',
         'coordinates': [[(481070, 4481140), (481040, 4481160),
@@ -99,18 +128,15 @@ def rotation_geometry():
 
 @pytest.fixture
 def geojson_point():
-    """
+    """A 2D Point.
+
     Returns
     -------
-
-    dict: GeoJSON-style Point geometry object.
+    dict : GeoJSON-style Point geometry object.
         Coordinates are in grid coordinates (Affine.identity()).
-    """
 
-    return {
-        'type': 'Point',
-        'coordinates': (2, 2)
-    }
+    """
+    return {"type": "Point", "coordinates": (2, 2)}
 
 
 @pytest.fixture
@@ -358,10 +384,6 @@ def basic_image_file(tmpdir, basic_image):
     string
         Filename of test raster file
     """
-
-    from affine import Affine
-    import rasterio
-
     image = basic_image
 
     outfilename = str(tmpdir.join('basic_image.tif'))
@@ -393,10 +415,6 @@ def pixelated_image_file(tmpdir, pixelated_image):
     string
         Filename of test raster file
     """
-
-    from affine import Affine
-    import rasterio
-
     image = pixelated_image
 
     outfilename = str(tmpdir.join('pixelated_image.tif'))
@@ -428,10 +446,6 @@ def rotated_image_file(tmpdir, pixelated_image):
     string
         Filename of test raster file
     """
-
-    from affine import Affine
-    import rasterio
-
     image = 128 * np.ones((1000, 2000), dtype=np.uint8)
 
     rotated_transform = Affine(-0.05, 0.07, 481060,
@@ -455,10 +469,42 @@ def rotated_image_file(tmpdir, pixelated_image):
     return outfilename
 
 
+@pytest.fixture()
+def image_file_with_custom_size_and_transform(tmpdir):
+    """
+    A basic raster file with a 10x10 array containing a
+    caller supplied transform.
+
+    Returns
+    -------
+
+    string
+        Filename of test raster file
+    """
+    def inner(width, height, transform):
+        image = np.zeros((height, width))
+
+        outfilename = str(tmpdir.join('basic_image.tif'))
+        kwargs = {
+            "crs": CRS({'init': 'epsg:4326'}),
+            "transform": transform,
+            "count": 1,
+            "dtype": rasterio.uint8,
+            "driver": "GTiff",
+            "width": image.shape[1],
+            "height": image.shape[0],
+            "nodata": None
+        }
+        with rasterio.open(outfilename, 'w', **kwargs) as out:
+            out.write(image, indexes=1)
+
+        return outfilename
+
+    return inner
+
+
 @pytest.fixture(scope='function')
 def gdalenv(request):
-    import rasterio.env
-
     def fin():
         if rasterio.env.local._env:
             rasterio.env.delenv()
@@ -470,13 +516,31 @@ def gdalenv(request):
 @pytest.fixture(scope='session')
 def data_dir():
     """Absolute file path to the directory containing test datasets."""
-    return os.path.abspath(os.path.join('tests', 'data'))
+    root = os.path.join(os.path.dirname(__file__), '..')
+    return os.path.abspath(os.path.join(root, 'tests', 'data'))
 
 
 @pytest.fixture(scope='session')
 def path_rgb_byte_tif(data_dir):
     """The original RGB test fixture with no sidecar files"""
     return os.path.join(data_dir, 'RGB.byte.tif')
+
+
+@pytest.fixture(scope='session')
+def path_srtm_hgt(data_dir):
+    """Sample SRTM HGT file"""
+    return os.path.join(data_dir, 'N10W110.hgt.zip')
+
+
+@pytest.fixture(scope='session')
+def path_rgb_lzw_byte_tif(data_dir):
+    """The original RGB test fixture with LZW compression."""
+    return os.path.join(data_dir, 'rgb_lzw.tif')
+
+
+@pytest.fixture(scope='session')
+def path_rgb_byte_rpc_vrt(data_dir):
+    return os.path.join(data_dir, 'RGB.byte.rpc.vrt')
 
 
 @pytest.fixture(scope='session')
@@ -494,6 +558,11 @@ def path_rgb_msk_byte_tif(data_dir):
 @pytest.fixture(scope='session')
 def path_cogeo_tif(data_dir):
     return os.path.join(data_dir, 'cogeo.tif')
+
+
+@pytest.fixture(scope='session')
+def path_white_gemini_iv_vrt(data_dir):
+    return os.path.join(data_dir, 'white-gemini-iv.vrt')
 
 
 @pytest.fixture(scope='function')
@@ -570,7 +639,7 @@ def path_alpha_tif(data_dir):
 def path_zip_file(data_dir):
     """Creates ``coutwildrnp.zip`` if it does not exist and returns
     the absolute file path."""
-    path = '{}/white-gemini-iv.zip'.format(data_dir)
+    path = f"{data_dir}/white-gemini-iv.zip"
     if not os.path.exists(path):
         with zipfile.ZipFile(path, 'w') as zip:
             for filename in ['white-gemini-iv.vrt',
@@ -582,11 +651,11 @@ def path_zip_file(data_dir):
 @pytest.fixture(autouse=True)
 def set_mem_name(request, monkeypatch):
     def youyoueyedeefour():
-        return "{}-{}".format(request.node.name, uuid.uuid4())
+        return f"{request.node.name}-{uuid.uuid4()}"
     monkeypatch.setattr(rasterio._io, "uuid4", youyoueyedeefour)
 
 
-class MockGeoInterface(object):
+class MockGeoInterface:
     """Tiny wrapper for GeoJSON to present an object with __geo_interface__ for testing"""
     def __init__(self, geojson):
         self.__geo_interface__ = geojson
@@ -595,38 +664,24 @@ class MockGeoInterface(object):
 # Define helpers to skip tests based on GDAL version
 gdal_version = GDALVersion.runtime()
 
-requires_only_gdal1 = pytest.mark.skipif(
-    gdal_version.major != 1,
-    reason="Only relevant for GDAL 1.x")
+requires_gdal37 = pytest.mark.skipif(
+    not gdal_version.at_least('3.7'), reason="Requires GDAL 3.7.x"
+)
 
-requires_gdal2 = pytest.mark.skipif(
-    not gdal_version.major >= 2,
-    reason="Requires GDAL 2.x")
+requires_gdal_lt_37 = pytest.mark.skipif(
+    gdal_version.at_least('3.7'), reason="Requires GDAL before 3.7"
+)
 
-requires_gdal21 = pytest.mark.skipif(
-    not gdal_version.at_least('2.1'),
-    reason="Requires GDAL 2.1.x")
 
-requires_gdal22 = pytest.mark.skipif(
-    not gdal_version.at_least('2.2'),
-    reason="Requires GDAL 2.2.x")
+def assert_bounding_box_equal(expected, actual, tolerance=1e-4):
+    if isinstance(expected, tuple):
+        expected = BoundingBox(*expected)
+    if isinstance(actual, tuple):
+        actual = BoundingBox(*actual)
 
-requires_gdal23 = pytest.mark.skipif(
-    not gdal_version.at_least('2.3'),
-    reason="Requires GDAL ~= 2.3")
+    left = abs(expected.left - actual.left)
+    bottom = abs(expected.bottom - actual.bottom)
+    right = abs(expected.right - actual.right)
+    top = abs(expected.top - actual.top)
 
-requires_gdal_lt_3 = pytest.mark.skipif(
-    gdal_version.__lt__('3.0'),
-    reason="Requires GDAL 1.x/2.x")
-
-requires_gdal3 = pytest.mark.skipif(
-    not gdal_version.at_least('3.0'),
-    reason="Requires GDAL 3.0.x")
-
-requires_gdal32 = pytest.mark.skipif(
-    not gdal_version.at_least('3.2'),
-    reason="Requires GDAL 3.2.x")
-
-requires_gdal33 = pytest.mark.skipif(
-    not gdal_version.at_least('3.3'),
-    reason="Requires GDAL 3.3.x")
+    assert all(diff < tolerance for diff in [left, bottom, right, top]), f"{expected} differs from {actual}"

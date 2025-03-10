@@ -1,7 +1,7 @@
 """rasterio.warp module tests"""
 
-import json
 import logging
+import os
 import sys
 
 from affine import Affine
@@ -10,14 +10,15 @@ from numpy.testing import assert_almost_equal
 import pytest
 
 import rasterio
+from rasterio._err import CPLE_AppDefinedError
 from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.env import GDALVersion
 from rasterio.errors import (
     CRSError,
     GDALVersionError,
     TransformError,
+    RPCError,
     WarpOperationError,
 )
 from rasterio.warp import (
@@ -28,15 +29,13 @@ from rasterio.warp import (
     calculate_default_transform,
     aligned_target,
     SUPPORTED_RESAMPLING,
-    GDAL2_RESAMPLING,
 )
 from rasterio import windows
 
-from .conftest import requires_gdal22, requires_gdal3, requires_gdal_lt_3
+from . import rangehttpserver
+from .conftest import gdal_version
 
 log = logging.getLogger(__name__)
-
-gdal_version = GDALVersion.runtime()
 
 
 DST_TRANSFORM = Affine(300.0, 0.0, -8789636.708, 0.0, -300.0, 2943560.235)
@@ -49,16 +48,23 @@ def flatten_coords(coordinates):
             yield elem
 
         else:
-            for x in flatten_coords(elem):
-                yield x
+            yield from flatten_coords(elem)
 
 
-reproj_expected = (
-    ({"CHECK_WITH_INVERT_PROJ": False}, 6644), ({"CHECK_WITH_INVERT_PROJ": True}, 6644)
-)
+if gdal_version.at_least("3.6"):
+    # GH2662
+    reproj_expected = (
+        ({"CHECK_WITH_INVERT_PROJ": False}, 6646),
+        ({"CHECK_WITH_INVERT_PROJ": True}, 6646)
+    )
+else:
+    reproj_expected = (
+        ({"CHECK_WITH_INVERT_PROJ": False}, 6644),
+        ({"CHECK_WITH_INVERT_PROJ": True}, 6644)
+    )
 
 
-class ReprojectParams(object):
+class ReprojectParams:
     """Class to assist testing reprojection by encapsulating parameters."""
 
     def __init__(self, left, bottom, right, top, width, height, src_crs, dst_crs):
@@ -104,6 +110,68 @@ def uninvertable_reproject_params():
 
 
 WGS84_crs = CRS.from_epsg(4326)
+
+
+class RangeRequestErrorHandler(rangehttpserver.RangeRequestHandler):
+    """Return 500 for a range of bytes to simulate a malfunctioning server.
+
+    The byte range is specific to rasterio's RGB.byte.tif file.
+
+    """
+
+    def send_head(self):
+        if "Range" not in self.headers:
+            self.range = None
+            return super().send_head()
+        try:
+            self.range = rangehttpserver.parse_byte_range(self.headers["Range"])
+        except ValueError as e:
+            self.send_error(400, "Invalid byte range")
+            return None
+        first, last = self.range
+
+        # Our "poison byte" is at position 1609000.
+        if first <= 1609000 <= last:
+            self.send_error(500, "Boom!")
+            return None
+
+        # Mirroring SimpleHTTPServer.py here
+        path = self.translate_path(self.path)
+        f = None
+        ctype = self.guess_type(path)
+        try:
+            f = open(path, "rb")
+        except OSError:
+            self.send_error(404, "File not found")
+            return None
+
+        fs = os.fstat(f.fileno())
+        file_len = fs[6]
+        if first >= file_len:
+            self.send_error(416, "Requested Range Not Satisfiable")
+            return None
+
+        self.send_response(206)
+        self.send_header("Content-type", ctype)
+        self.send_header("Accept-Ranges", "bytes")
+
+        if last is None or last >= file_len:
+            last = file_len - 1
+        response_length = last - first + 1
+
+        self.send_header(
+            "Content-Range", "bytes {}-{}/{}".format(first, last, file_len)
+        )
+        self.send_header("Content-Length", str(response_length))
+        self.send_header("Last-Modified", self.date_time_string(fs.st_mtime))
+        self.end_headers()
+        return f
+
+
+@pytest.fixture(scope="session")
+def rpcs():
+    with rasterio.open("tests/data/RGB.byte.rpc.vrt") as src:
+        return src.rpcs
 
 
 def test_transform_src_crs_none():
@@ -224,6 +292,7 @@ def test_transform_bounds__esri_wkt():
     )
 
 
+@pytest.mark.xfail(reason="Projection extents have changed with PROJ 9")
 @pytest.mark.parametrize(
     "density,expected",
     [
@@ -235,12 +304,14 @@ def test_transform_bounds_densify(density, expected):
     # This transform is non-linear along the edges, so densification produces
     # a different result than otherwise
     src_crs = CRS.from_epsg(4326)
-    dst_crs = CRS.from_epsg(2163)
-    with rasterio.Env(OSR_USE_NON_DEPRECATED="NO"):
-        assert np.allclose(
-            expected,
-            transform_bounds(src_crs, dst_crs, -120, 40, -80, 64, densify_pts=density),
-        )
+    dst_crs = CRS.from_proj4(
+        "+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 "
+        "+a=6370997 +b=6370997 +units=m +no_defs"
+    )
+    assert np.allclose(
+        expected,
+        transform_bounds(src_crs, dst_crs, -120, 40, -80, 64, densify_pts=density),
+    )
 
 
 def test_transform_bounds_no_change():
@@ -251,7 +322,7 @@ def test_transform_bounds_no_change():
 
 
 def test_transform_bounds_densify_out_of_bounds():
-    with pytest.raises(ValueError):
+    with pytest.raises(CPLE_AppDefinedError):
         transform_bounds(
             CRS.from_epsg(4326),
             CRS.from_epsg(32610),
@@ -282,6 +353,56 @@ def test_calculate_default_transform():
         assert dst_transform.almost_equals(target_transform)
         assert width == 835
         assert height == 696
+
+
+def test_calculate_default_transform_geoloc_array():
+    target_transform = Affine(
+        0.0028535715391804096,
+        0.0,
+        -78.95864996545055,
+        0.0,
+        -0.0028535715391804096,
+        25.550873767433984,
+    )
+
+    with rasterio.open("tests/data/RGB.byte.tif") as src:
+        xs, ys = src.transform * np.meshgrid(
+            np.arange(0, src.width, 10), np.arange(0, src.height, 10)
+        )
+        dst_transform, width, height = calculate_default_transform(
+            src.crs,
+            CRS.from_epsg(4326),
+            src.width,
+            src.height,
+            src_geoloc_array=(xs, ys),
+        )
+
+        assert dst_transform.almost_equals(target_transform, precision=1e-3)
+        assert width == 838
+        assert height == 692
+
+
+def test_calculate_default_transform_rpcs(rpcs):
+    target_transform = Affine(
+        7.516528579807828e-05,
+        0.0,
+        -123.48824818566493,
+        0.0,
+        -7.516528579807828e-05,
+        49.52797830474044,
+    )
+
+    dst_transform, width, height = calculate_default_transform(
+        CRS.from_epsg(32618),
+        CRS.from_epsg(4326),
+        791,
+        718,
+        rpcs=rpcs,
+    )
+
+    assert dst_transform.almost_equals(target_transform, precision=1e-4)
+    assert height == 553
+    assert width == 1144
 
 
 def test_calculate_default_transform_single_resolution():
@@ -393,6 +514,41 @@ def test_reproject_ndarray():
     assert (out > 0).sum() == 438113
 
 
+def test_reproject_ndarray_slice():
+    """Test for issue #2511, destination with strides"""
+
+    with rasterio.open("tests/data/RGB.byte.tif") as src:
+        source = src.read(1)
+
+    dst_crs = dict(
+        proj="merc",
+        a=6378137,
+        b=6378137,
+        lat_ts=0.0,
+        lon_0=0.0,
+        x_0=0.0,
+        y_0=0,
+        k=1.0,
+        units="m",
+        nadgrids="@null",
+        wktext=True,
+        no_defs=True,
+    )
+
+    out = np.zeros((src.count, src.height, src.width+2), dtype=np.uint8)[..., 1:-1]
+    assert out.__array_interface__["strides"] is not None
+    reproject(
+        source,
+        out,
+        src_transform=src.transform,
+        src_crs=src.crs,
+        dst_transform=DST_TRANSFORM,
+        dst_crs=dst_crs,
+        resampling=Resampling.nearest,
+    )
+    assert (out > 0).sum() == 438113
+
+
 def test_reproject_view():
     """Source views are reprojected properly"""
     with rasterio.open("tests/data/RGB.byte.tif") as src:
@@ -433,7 +589,11 @@ def test_reproject_view():
         resampling=Resampling.nearest,
     )
 
-    assert (out > 0).sum() == 299199
+    expected_sum = 299199
+    if gdal_version.at_least("3.6"):
+        # GH2662
+        expected_sum = 299231
+    assert (out > 0).sum() == expected_sum
 
 
 def test_reproject_epsg():
@@ -584,7 +744,6 @@ def test_reproject_out_of_bounds():
     assert not out.any()
 
 
-@requires_gdal3
 @pytest.mark.parametrize("options, expected", reproj_expected)
 def test_reproject_nodata(options, expected):
     # Older combinations of GDAL and PROJ might have got this transformation wrong.
@@ -614,7 +773,6 @@ def test_reproject_nodata(options, expected):
         )
 
 
-@requires_gdal3
 @pytest.mark.parametrize("options, expected", reproj_expected)
 def test_reproject_nodata_nan(options, expected):
 
@@ -639,7 +797,6 @@ def test_reproject_nodata_nan(options, expected):
         assert np.isnan(out).sum() == (params.dst_width * params.dst_height - expected)
 
 
-@requires_gdal3
 @pytest.mark.parametrize("options, expected", reproj_expected)
 def test_reproject_dst_nodata_default(options, expected):
     """If nodata is not provided, destination will be filled with 0."""
@@ -1108,14 +1265,14 @@ def test_reproject_resampling(path_rgb_byte_tif, method):
         Resampling.cubic: [437888],
         Resampling.cubic_spline: [440475],
         Resampling.lanczos: [436001],
-        Resampling.average: [439419, 439172],  # latter value for GDAL 3.1
+        Resampling.average: [439172],
         Resampling.mode: [437298],
         Resampling.max: [439464],
         Resampling.min: [436397],
         Resampling.med: [437194],
         Resampling.q1: [436397],
         Resampling.q3: [438948],
-        Resampling.sum: [439118],
+        Resampling.sum: [439118, 439142],  # 439142 for GDAL 3.6+
         Resampling.rms: [439385],
     }
 
@@ -1169,7 +1326,25 @@ def test_reproject_array_interface(test3d, count_nonzero, path_rgb_byte_tif):
     assert np.count_nonzero(out.data[out.data != 99]) == count_nonzero
 
 
-@pytest.mark.parametrize("test3d,count_nonzero", [(True, 1309625), (False, 437686)])
+@pytest.mark.parametrize(
+    "test3d,count_nonzero",
+    [
+        pytest.param(
+            True,
+            1308064,
+            marks=pytest.mark.skipif(
+                not gdal_version.at_least("3.8"), reason="Requires GDAL 3.8.x"
+            ),
+        ),
+        pytest.param(
+            False,
+            437686,
+            marks=pytest.mark.skipif(
+                not gdal_version.at_least("3.8"), reason="Requires GDAL 3.8.x"
+            ),
+        ),
+    ],
+)
 def test_reproject_masked(test3d, count_nonzero, path_rgb_byte_tif):
     with rasterio.open(path_rgb_byte_tif) as src:
         if test3d:
@@ -1187,7 +1362,47 @@ def test_reproject_masked(test3d, count_nonzero, path_rgb_byte_tif):
         dst_nodata=99,
     )
     assert np.ma.is_masked(source)
+    assert source.shape == out.shape
     assert np.count_nonzero(out[out != 99]) == count_nonzero
+    assert not np.ma.is_masked(out)
+
+
+@pytest.mark.parametrize(
+    "test3d,count_nonzero",
+    [
+        pytest.param(
+            True,
+            1312959,
+            marks=pytest.mark.skipif(
+                not gdal_version.at_least("3.8"), reason="Requires GDAL 3.8.x"
+            ),
+        ),
+        pytest.param(
+            False,
+            438113,
+            marks=pytest.mark.skipif(
+                not gdal_version.at_least("3.8"), reason="Requires GDAL 3.8.x"
+            ),
+        ),
+    ]
+)
+def test_reproject_masked_masked_output(test3d, count_nonzero, path_rgb_byte_tif):
+    with rasterio.open(path_rgb_byte_tif) as src:
+        if test3d:
+            inp = src.read(masked=True)
+        else:
+            inp = src.read(1, masked=True)
+    out = np.ma.masked_array(np.empty(inp.shape, dtype=np.uint8))
+    out, _ = reproject(
+        inp,
+        out,
+        src_transform=src.transform,
+        src_crs=src.crs,
+        dst_transform=DST_TRANSFORM,
+        dst_crs="EPSG:3857",
+    )
+    assert inp.shape == out.shape
+    assert np.count_nonzero(out[out != np.ma.masked]) == count_nonzero
 
 
 @pytest.mark.parametrize("method", SUPPORTED_RESAMPLING)
@@ -1201,14 +1416,14 @@ def test_reproject_resampling_alpha(method):
         Resampling.cubic: [437888],
         Resampling.cubic_spline: [440475],
         Resampling.lanczos: [436001],
-        Resampling.average: [439419, 439172],  # latter value for GDAL 3.1
+        Resampling.average: [439172],
         Resampling.mode: [437298],
         Resampling.max: [439464],
         Resampling.min: [436397],
         Resampling.med: [437194],
         Resampling.q1: [436397],
         Resampling.q3: [438948],
-        Resampling.sum: [439118],
+        Resampling.sum: [439118, 439142],  # 439142 for GDAL 3.6+
         Resampling.rms: [439385],
     }
 
@@ -1227,29 +1442,6 @@ def test_reproject_resampling_alpha(method):
     )
 
     assert np.count_nonzero(out) in expected[method]
-
-
-@pytest.mark.skipif(
-    gdal_version.at_least("2.0"), reason="Tests only applicable to GDAL < 2.0"
-)
-@pytest.mark.parametrize("method", GDAL2_RESAMPLING)
-def test_reproject_not_yet_supported_resampling(method):
-    """Test resampling methods not yet supported by this version of GDAL"""
-    with rasterio.open("tests/data/RGB.byte.tif") as src:
-        source = src.read(1)
-
-    dst_crs = "EPSG:32619"
-    out = np.empty(src.shape, dtype=np.uint8)
-    with pytest.raises(GDALVersionError):
-        reproject(
-            source,
-            out,
-            src_transform=src.transform,
-            src_crs=src.crs,
-            dst_transform=DST_TRANSFORM,
-            dst_crs=dst_crs,
-            resampling=method,
-        )
 
 
 def test_reproject_unsupported_resampling():
@@ -1312,14 +1504,7 @@ def test_resample_default_invert_proj(method):
 
     out = np.empty(shape=(dst_height, dst_width), dtype=np.uint8)
 
-    # GDAL 1.11 needs to have this config option set on to match the
-    # default results in later versions.
-    if gdal_version.major == 1:
-        options = dict(CHECK_WITH_INVERT_PROJ=True)
-    else:
-        options = {}
-
-    with rasterio.Env(**options):
+    with rasterio.Env():
         reproject(
             source,
             out,
@@ -1388,7 +1573,7 @@ def test_resample_no_invert_proj(method):
     ):
         pytest.xfail(
             reason="Some resampling methods succeed but produce blank images. "
-            "See https://github.com/mapbox/rasterio/issues/614"
+            "See https://github.com/rasterio/rasterio/issues/614"
         )
 
     with rasterio.Env(CHECK_WITH_INVERT_PROJ=False):
@@ -1500,10 +1685,13 @@ def rgb_byte_profile():
         return src.profile
 
 
-def test_reproject_gcps_transform_exclusivity():
-    """gcps and transform can't be used together."""
+@pytest.mark.parametrize(
+    "params", [{"gcps": [0]}, {"rpcs": [0]}, {"src_geoloc_array": (0, 0)}]
+)
+def test_reproject_src_geoloc_exclusivity(params):
+    """Different kinds of source geolocation can't be used together."""
     with pytest.raises(ValueError):
-        reproject(1, 1, gcps=[0], src_transform=[0])
+        reproject(1, 1, src_transform=[0], **params)
 
 
 def test_reproject_gcps(rgb_byte_profile):
@@ -1535,9 +1723,6 @@ def test_reproject_gcps(rgb_byte_profile):
     assert not out[:, -1, 0].any()
 
 
-@requires_gdal22(
-    reason="GDAL 2.2.0 and newer has different antimeridian cutting behavior."
-)
 def test_transform_geom_gdal22():
     """Enabling `antimeridian_cutting` has no effect on GDAL 2.2.0 or newer
     where antimeridian cutting is always enabled.  This could produce
@@ -1549,7 +1734,7 @@ def test_transform_geom_gdal22():
 
 
 def test_issue1056():
-    """Warp sucessfully from RGB's upper bands to an array"""
+    """Warp successfully from RGB's upper bands to an array"""
     with rasterio.open("tests/data/RGB.byte.tif") as src:
         dst_crs = "EPSG:3857"
         out = np.zeros(src.shape, dtype=np.uint8)
@@ -1670,29 +1855,32 @@ def test_issue_1446():
     assert round(g["coordinates"][1], 1) == 4212702.1
 
 
-@requires_gdal_lt_3
-def test_issue_1446_b():
-    """Confirm that lines aren't thrown as reported in #1446"""
-    src_crs = CRS.from_epsg(4326)
-    dst_crs = CRS(
+def test_transform_geom_geometry_collection():
+    output = transform_geom(
+        "EPSG:4326",
+        "EPSG:3857",
         {
-            "proj": "sinu",
-            "lon_0": 350.85607029556,
-            "x_0": 0,
-            "y_0": 0,
-            "a": 3396190,
-            "b": 3396190,
-            "units": "m",
-            "no_defs": True,
+            "type": "GeometryCollection",
+            "geometries": [
+                {
+                    "type": "Point",
+                    "coordinates": [1, 2]
+                }
+            ]
         }
     )
-    collection = json.load(open("tests/data/issue1446.geojson"))
-    geoms = {f["properties"]["fid"]: f["geometry"] for f in collection["features"]}
-    transformed_geoms = {
-        k: transform_geom(src_crs, dst_crs, g) for k, g in geoms.items()
+    assert output == {
+        'type': 'GeometryCollection',
+        'geometries': [
+            {
+                'type': 'Point',
+                'coordinates': (
+                    pytest.approx(111319.49079327357),
+                    pytest.approx(222684.20850554405)
+                )
+            }
+        ]
     }
-    # Before the fix, this geometry was thrown eastward of 0.0. It should be between -350 and -250.
-    assert all([-350 < x < -150 for x, y in transformed_geoms[183519]["coordinates"]])
 
 
 def test_reproject_init_dest_nodata():
@@ -1924,91 +2112,32 @@ def test_reproject_rpcs_approx_transformer(caplog):
         assert "Created approximate transformer" in caplog.text
 
 
+@pytest.mark.network
 @pytest.fixture
 def http_error_server(data):
     """Serves files from the test data directory, poorly."""
     import functools
     import multiprocessing
     import http.server
-    import os
 
-    from . import rangehttpserver
-
-    class RangeRequestErrorHandler(rangehttpserver.RangeRequestHandler):
-        """Return 500 for a range of bytes to simulate a malfunctioning server.
-
-        The byte range is specific to rasterio's RGB.byte.tif file.
-
-        """
-
-        def send_head(self):
-            if "Range" not in self.headers:
-                self.range = None
-                return super().send_head()
-            try:
-                self.range = rangehttpserver.parse_byte_range(self.headers["Range"])
-            except ValueError as e:
-                self.send_error(400, "Invalid byte range")
-                return None
-            first, last = self.range
-
-            # Our "poison byte" is at position 1609000.
-            if first <= 1609000 <= last:
-                self.send_error(500, "Boom!")
-                return None
-
-            # Mirroring SimpleHTTPServer.py here
-            path = self.translate_path(self.path)
-            f = None
-            ctype = self.guess_type(path)
-            try:
-                f = open(path, "rb")
-            except IOError:
-                self.send_error(404, "File not found")
-                return None
-
-            fs = os.fstat(f.fileno())
-            file_len = fs[6]
-            if first >= file_len:
-                self.send_error(416, "Requested Range Not Satisfiable")
-                return None
-
-            self.send_response(206)
-            self.send_header("Content-type", ctype)
-            self.send_header("Accept-Ranges", "bytes")
-
-            if last is None or last >= file_len:
-                last = file_len - 1
-            response_length = last - first + 1
-
-            self.send_header(
-                "Content-Range", "bytes %s-%s/%s" % (first, last, file_len)
-            )
-            self.send_header("Content-Length", str(response_length))
-            self.send_header("Last-Modified", self.date_time_string(fs.st_mtime))
-            self.end_headers()
-            return f
-
-    PORT = 8000
     Handler = functools.partial(RangeRequestErrorHandler, directory=str(data))
-    httpd = http.server.HTTPServer(("", PORT), Handler)
+    httpd = http.server.HTTPServer(("", 0), Handler)
     p = multiprocessing.Process(target=httpd.serve_forever)
     p.start()
-    yield
+    yield f'{httpd.server_name}:{httpd.server_port}'
     p.terminate()
     p.join()
 
 
-@requires_gdal3
 @pytest.mark.skipif(
-    sys.version_info < (3, 7),
-    reason="Python 3.7 required to serve the data fixture directory",
+    sys.platform != "linux",
+    reason="the server fixture requires Linux",
 )
 def test_reproject_error_propagation(http_error_server, caplog):
     """Propagate errors up from ChunkAndWarpMulti and check for a retry."""
 
     with rasterio.open(
-        "/vsicurl?max_retry=1&retry_delay=.1&url=http://localhost:8000/RGB.byte.tif"
+        f"/vsicurl?max_retry=1&retry_delay=.1&url=http://{http_error_server}/RGB.byte.tif"
     ) as src:
         out = np.zeros((src.count, src.height, src.width), dtype="uint8")
 
@@ -2020,4 +2149,212 @@ def test_reproject_error_propagation(http_error_server, caplog):
                 dst_transform=src.transform,
             )
 
-    assert len([rec for rec in caplog.records if "Retrying again" in rec.message]) == 2
+    assert len([rec for rec in caplog.records if "Retrying again" in rec.message]) >= 2
+
+
+def test_reproject_to_specified_output_bands():
+    """
+    Reproject multiple input rasters to a single output raster, joining their bands.
+
+    In this example, we concatenate a RGB raster with a mocked NIR image, while reprojecting and resampling both.
+    """
+    with rasterio.open('tests/data/rgb1.tif') as src_rgb, \
+            rasterio.open('tests/data/rgb1_fake_nir_epsg3857.tif') as src_nir:
+        output_crs = CRS.from_epsg(4326)
+        output_transform, output_width, output_height = calculate_default_transform(
+            src_rgb.crs,
+            output_crs,
+            src_rgb.width,
+            src_rgb.height,
+            *src_rgb.bounds)
+        with rasterio.MemoryFile() as mem:
+            with mem.open(
+                    driver="GTiff",
+                    width=output_width,
+                    height=output_height,
+                    count=5,
+                    transform=output_transform,
+                    dtype="uint8",
+                    nodata=0,
+                    crs=output_crs,
+            ) as out:  # type: rasterio.io.DatasetWriter
+                reproject(
+                    rasterio.band(src_rgb, src_rgb.indexes),
+                    rasterio.band(out, src_rgb.indexes),
+                    resampling=Resampling.nearest,
+                )
+                reproject(
+                    rasterio.band(src_nir, 1),
+                    rasterio.band(out, 4),
+                    resampling=Resampling.nearest,
+                )
+
+            with mem.open() as out:  # type: rasterio.DatasetReader
+                assert out.count == 5
+
+                for i in range(1, 5):
+                    band_data = out.read(i)
+                    assert (band_data != 0).any()
+
+                band_data = out.read(5)
+                assert (band_data == 0).all()
+
+
+def test_rpcs_non_epsg4326():
+    with pytest.raises(RPCError):
+        with rasterio.open('tests/data/RGB.byte.rpc.vrt') as src:
+            src_rpcs = src.rpcs
+            reproject(
+                rasterio.band(src, src.indexes),
+                src_crs="EPSG:3857",
+                rpcs=src_rpcs,
+                dst_crs="EPSG:4326",
+                resampling=Resampling.nearest,
+            )
+
+
+def test_coordinate_pipeline(tmp_path):
+    """Transformer COORDINATE_OPERATION option is activated."""
+    pipeline = "proj=pipeline step inv proj=utm zone=11 ellps=clrk66 step proj=unitconvert xy_in=rad xy_out=deg step proj=axisswap order=2,1"
+    with rasterio.open("tests/data/byte.tif") as src:
+        output_transform, output_width, output_height = calculate_default_transform(
+            src.crs,
+            "EPSG:4326",
+            src.width,
+            src.height,
+            *src.bounds,
+            coordinate_operation=pipeline
+        )
+
+        assert output_height == 18
+        assert output_width == 22
+
+        profile = src.profile
+        profile.update(
+            driver="GTiff",
+            height=output_height,
+            width=output_width,
+            transform=output_transform,
+            crs="EPSG:4326",
+        )
+        with rasterio.open(tmp_path.joinpath("test.tif"), "w", **profile) as dst:
+            reproject(
+                rasterio.band(src, src.indexes),
+                rasterio.band(dst, dst.indexes),
+                resampling=Resampling.cubic,
+                coordinate_operation=pipeline,
+            )
+            # This is the same value as in GDAL's test_gdalwarp_lib_ct.
+            assert dst.checksum(1) == 4705
+
+
+
+@pytest.mark.skipif(not gdal_version.at_least("3.6"), reason="Requires GDAL 3.6")
+def test_geoloc_warp_dataset(data, tmp_path):
+    """Warp a dataset using external geolocation arrays."""
+    filename = str(data.join("RGB.byte.tif"))
+
+    # Extract geolocation arrays and create suitable destination dataset.
+    with rasterio.open(filename) as src:
+        xs, ys = src.transform * np.meshgrid(
+            np.arange(src.width), np.arange(src.height)
+        )
+
+        profile = src.profile
+        profile.update(
+            driver="GTiff",
+            height=800,
+            width=880,
+            transform=DST_TRANSFORM,
+            crs="EPSG:3857",
+        )
+
+    # Now alter the source's geotransform. If the geolocation arrays
+    # aren't used, we'll notice.
+    with rasterio.open(filename, "r+") as src:
+        src.transform = Affine.identity()
+
+    # Reproject the altered source file using provided geolocation
+    # arrays.
+    with rasterio.open(filename) as src:
+        with rasterio.open(tmp_path.joinpath("test.tif"), "w", **profile) as dst:
+            reproject(
+                rasterio.band(src, src.indexes),
+                rasterio.band(dst, dst.indexes),
+                src_crs=src.crs,
+                src_geoloc_array=np.stack((xs, ys)),
+                resampling=Resampling.bilinear,
+                num_threads=2,
+            )
+
+    with rasterio.open(tmp_path.joinpath("test.tif")) as dst:
+        out = dst.read(1)
+
+    # This value is specific to DST_TRANSFORM and an 800 x 880 file.
+    assert np.count_nonzero(out) in [464910]
+
+
+# Before GDAL 3.5.2 geoloc array files aren't recognized and this error
+# would be seen from the following tests:
+#
+# rasterio._err.CPLE_AppDefinedError: The transformation is already
+# "north up" or a transformation between pixel/line and georeferenced
+# coordinates cannot be computed for
+# MEM:::DATAPOINTER=137539856,PIXELS=791,LINES=718,BANDS=3,DATATYPE=Byte.
+# There is no affine transformation and no GCPs. Specify transformation
+# option SRC_METHOD=NO_GEOTRANSFORM to bypass this check.
+@pytest.mark.skipif(not gdal_version.at_least("3.6"), reason="Requires GDAL 3.6")
+def test_geoloc_warp_array(path_rgb_byte_tif, tmp_path):
+    """Warp an array using external geolocation arrays."""
+    with rasterio.open(path_rgb_byte_tif) as src:
+        xs, ys = src.transform * np.meshgrid(
+            np.arange(src.width), np.arange(src.height)
+        )
+        source = src.read()
+
+    output = np.zeros((3, 800, 880), dtype="uint8")
+
+    reproject(
+        source,
+        output,
+        src_crs=src.crs,
+        src_geoloc_array=np.stack((xs, ys)),
+        src_nodata=0,
+        dst_transform=DST_TRANSFORM,
+        dst_crs="EPSG:3857",
+        dst_height=800,
+        dst_width=880,
+        resampling=Resampling.bilinear,
+    )
+
+    # This value is specific to DST_TRANSFORM and an 800 x 880 array.
+    assert np.count_nonzero(output[0]) in [464910]
+
+
+@pytest.mark.skipif(not gdal_version.at_least("3.6"), reason="Requires GDAL 3.6")
+def test_geoloc_warp_array_subsampled(path_rgb_byte_tif, tmp_path):
+    """Warp an array using subsampled external geolocation arrays."""
+    with rasterio.open(path_rgb_byte_tif) as src:
+        xs, ys = src.transform * np.meshgrid(
+            np.arange(0, src.width, 10), np.arange(0, src.height, 10)
+        )
+        source = src.read()
+
+    output = np.zeros((3, 800, 880), dtype="uint8")
+
+    reproject(
+        source,
+        output,
+        src_crs=src.crs,
+        src_geoloc_array=(xs, ys),
+        src_nodata=0,
+        dst_transform=DST_TRANSFORM,
+        dst_crs="EPSG:3857",
+        dst_height=800,
+        dst_width=880,
+        resampling=Resampling.bilinear,
+    )
+
+    # This value is specific to DST_TRANSFORM and an 800 x 880 array.
+    assert np.count_nonzero(output[0]) in [471533]
+

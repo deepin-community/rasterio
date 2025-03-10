@@ -1,0 +1,6 @@
+# False positive (#1094364)
+missing-dependency-on-numpy-abi *
+
+# False positive
+package-contains-documentation-outside-usr-share-doc [usr/lib/python3/dist-packages/*.dist-info/*.txt]
+

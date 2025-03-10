@@ -3,7 +3,7 @@ Vector Features
 
 Rasterio's ``features`` module provides functions to extract shapes of raster
 features and to create new features by "burning" shapes into rasters:
-``shapes()`` and ``rasterize()``. These functions expose GDAL functions in
+:func:`.shapes` and :func:`.rasterize`. These functions expose GDAL functions in
 a general way, using iterators over GeoJSON-like Python objects instead of
 GIS layers.
 
@@ -24,7 +24,11 @@ The shapes of the foreground features can be extracted like this:
 
     with rasterio.open('13547682814_f2e459f7a5_o_d.png') as src:
         blue = src.read(3)
-
+   
+    # pprint requires that the image dtype must be one of: int16, int32, uint8, uint16, float32.
+    # If your data comes as int8 you can cast your data to an appropriate dtype like this: 
+    # data = data.astype('int16')
+    
     mask = blue != 255
     shapes = features.shapes(blue, mask=mask)
     pprint.pprint(next(shapes))
@@ -39,7 +43,7 @@ The shapes of the foreground features can be extracted like this:
     #   'type': 'Polygon'},
     # 253)
 
-The shapes iterator yields ``geometry, value`` pairs. The second item is the
+The shapes iterator yields ``(geometry, value)`` pairs. The second item is the
 value of the raster feature corresponding to the shape and the first is its
 geometry.  The coordinates of the geometries in this case are in pixel units
 with origin at the upper left of the image. If the source dataset was
@@ -49,10 +53,18 @@ georeferenced, you would get similarly georeferenced geometries like this:
 
     shapes = features.shapes(blue, mask=mask, transform=src.transform)
 
+For larger rasters, use the following shortcut with :py:func:`rasterio.band()` instead
+of reading the raster into an array.
+
+.. code-block:: python
+
+    with rasterio.open('13547682814_f2e459f7a5_o_d.png') as src:
+        shapes = features.shapes(rasterio.band(src, 3), mask=mask, transform=src.transform)
+
 Burning shapes into a raster
 ----------------------------
 
-To go the other direction, use ``rasterize()`` to burn values into the pixels
+To go the other direction, use :func:`.rasterize` to burn values into the pixels
 intersecting with geometries.
 
 .. code-block:: python

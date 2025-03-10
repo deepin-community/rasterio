@@ -1,46 +1,48 @@
 """
 Registry of common rio CLI options.  See cligj for more options.
 
--a, --all: Use all pixels touched by features.  In rio-mask, rio-rasterize
---as-mask/--not-as-mask: interpret band as mask or not.  In rio-shapes
---band/--mask: use band or mask.  In rio-shapes
---bbox:
--b, --bidx: band index(es) (singular or multiple value versions).
-    In rio-info, rio-sample, rio-shapes, rio-stack (different usages)
---bounds: bounds in world coordinates.
-    In rio-info, rio-rasterize (different usages)
---count: count of bands.  In rio-info
---crop: Crop raster to extent of features.  In rio-mask
---crs: CRS of input raster.  In rio-info
---default-value: default for rasterized pixels.  In rio-rasterize
---dimensions: Output width, height.  In rio-rasterize
---dst-crs: destination CRS.  In rio-transform
---fill: fill value for pixels not covered by features.  In rio-rasterize
---formats: list available formats.  In rio-info
---height: height of raster.  In rio-info
--i, --invert: Invert mask created from features: In rio-mask
--j, --geojson-mask: GeoJSON for masking raster.  In rio-mask
---lnglat: geograhpic coordinates of center of raster.  In rio-info
---masked/--not-masked: read masked data from source file.
-    In rio-calc, rio-info
--m, --mode: output file mode (r, r+).  In rio-insp
---name: input file name alias.  In rio-calc
---nodata: nodata value.  In rio-info, rio-merge (different usages)
---photometric: photometric interpretation.  In rio-stack
---property: GeoJSON property to use as values for rasterize.  In rio-rasterize
--r, --res: output resolution.
-    In rio-info, rio-rasterize (different usages.  TODO: try to combine
-    usages, prefer rio-rasterize version)
---sampling: Inverse of sampling fraction.  In rio-shapes
---shape: shape (width, height) of band.  In rio-info
---src-crs: source CRS.
-    In rio-insp, rio-rasterize (different usages.  TODO: consolidate usages)
---stats: print raster stats.  In rio-inf
--t, --dtype: data type.  In rio-calc, rio-info (different usages)
---width: width of raster.  In rio-info
---with-nodata/--without-nodata: include nodata regions or not.  In rio-shapes.
--v, --tell-me-more, --verbose
---vfs: virtual file system.
+.. code-block:: none
+
+    -a, --all: Use all pixels touched by features.  In rio-mask, rio-rasterize
+    --as-mask/--not-as-mask: interpret band as mask or not.  In rio-shapes
+    --band/--mask: use band or mask.  In rio-shapes
+    --bbox:
+    -b, --bidx: band index(es) (singular or multiple value versions).
+        In rio-info, rio-sample, rio-shapes, rio-stack (different usages)
+    --bounds: bounds in world coordinates.
+        In rio-info, rio-rasterize (different usages)
+    --count: count of bands.  In rio-info
+    --crop: Crop raster to extent of features.  In rio-mask
+    --crs: CRS of input raster.  In rio-info
+    --default-value: default for rasterized pixels.  In rio-rasterize
+    --dimensions: Output width, height.  In rio-rasterize
+    --dst-crs: destination CRS.  In rio-transform
+    --fill: fill value for pixels not covered by features.  In rio-rasterize
+    --formats: list available formats.  In rio-info
+    --height: height of raster.  In rio-info
+    -i, --invert: Invert mask created from features: In rio-mask
+    -j, --geojson-mask: GeoJSON for masking raster.  In rio-mask
+    --lnglat: geographic coordinates of center of raster.  In rio-info
+    --masked/--not-masked: read masked data from source file.
+        In rio-calc, rio-info
+    -m, --mode: output file mode (r, r+).  In rio-insp
+    --name: input file name alias.  In rio-calc
+    --nodata: nodata value.  In rio-info, rio-merge (different usages)
+    --photometric: photometric interpretation.  In rio-stack
+    --property: GeoJSON property to use as values for rasterize.  In rio-rasterize
+    -r, --res: output resolution.
+        In rio-info, rio-rasterize (different usages.  TODO: try to combine
+        usages, prefer rio-rasterize version)
+    --sampling: Inverse of sampling fraction.  In rio-shapes
+    --shape: shape (width, height) of band.  In rio-info
+    --src-crs: source CRS.
+        In rio-insp, rio-rasterize (different usages.  TODO: consolidate usages)
+    --stats: print raster stats.  In rio-inf
+    -t, --dtype: data type.  In rio-calc, rio-info (different usages)
+    --width: width of raster.  In rio-info
+    --with-nodata/--without-nodata: include nodata regions or not.  In rio-shapes.
+    -v, --tell-me-more, --verbose
+    --vfs: virtual file system.
 """
 
 import logging
@@ -51,7 +53,7 @@ import click
 
 import rasterio
 import rasterio.shutil
-from rasterio.path import parse_path, ParsedPath, UnparsedPath
+from rasterio._path import _parse_path, _UnparsedPath
 
 
 logger = logging.getLogger(__name__)
@@ -77,9 +79,8 @@ def _cb_key_val(ctx, param, value):
     else:
         out = {}
         for pair in value:
-            if '=' not in pair:
-                raise click.BadParameter(
-                    "Invalid syntax for KEY=VAL arg: {}".format(pair))
+            if "=" not in pair:
+                raise click.BadParameter(f"Invalid syntax for KEY=VAL arg: {pair}")
             else:
                 k, v = pair.split('=', 1)
                 k = k.lower()
@@ -96,9 +97,9 @@ def abspath_forward_slashes(path):
 def file_in_handler(ctx, param, value):
     """Normalize ordinary filesystem and VFS paths"""
     try:
-        path = parse_path(value)
+        path = _parse_path(value)
 
-        if isinstance(path, UnparsedPath):
+        if isinstance(path, _UnparsedPath):
 
             if os.path.exists(path.path) and rasterio.shutil.exists(value):
                 return abspath_forward_slashes(path.path)
@@ -111,20 +112,18 @@ def file_in_handler(ctx, param, value):
         elif path.archive:
             if os.path.exists(path.archive) and rasterio.shutil.exists(value):
                 archive = abspath_forward_slashes(path.archive)
-                return "{}://{}!{}".format(path.scheme, archive, path.path)
+                return f"{path.scheme}://{archive}!{path.path}"
             else:
-                raise IOError(
-                    "Input archive {} does not exist".format(path.archive))
+                raise OSError(f"Input archive {path.archive} does not exist")
 
         else:
             if os.path.exists(path.path) and rasterio.shutil.exists(value):
                 return abspath_forward_slashes(path.path)
             else:
-                raise IOError(
-                    "Input file {} does not exist".format(path.path))
+                raise OSError(f"Input file {path.path} does not exist")
 
     except Exception:
-        raise click.BadParameter("{} is not a valid input file".format(value))
+        raise click.BadParameter(f"{value} is not a valid input file")
 
 
 def files_in_handler(ctx, param, value):
@@ -173,7 +172,7 @@ def nodata_handler(ctx, param, value):
             return float(value)
         except (TypeError, ValueError):
             raise click.BadParameter(
-                "{!r} is not a number".format(value), param=param, param_hint="nodata"
+                f"{value!r} is not a number", param=param, param_hint="nodata"
             )
 
 
@@ -210,8 +209,8 @@ def bounds_handler(ctx, param, value):
             return retval
         except Exception:
             raise click.BadParameter(
-                "{0!r} is not a valid bounding box representation".format(
-                    value))
+                "{!r} is not a valid bounding box representation".format(value)
+            )
     else:  # pragma: no cover
         return retval
 
@@ -220,9 +219,7 @@ def bounds_handler(ctx, param, value):
 file_in_arg = click.argument('INPUT', callback=file_in_handler)
 
 # Singular output file
-file_out_arg = click.argument(
-    'OUTPUT',
-    type=click.Path(resolve_path=True))
+file_out_arg = click.argument("OUTPUT", type=click.Path())
 
 # Multiple input files.
 files_in_arg = click.argument(
@@ -262,10 +259,13 @@ bidx_magic_opt = click.option(
     multiple=True,
     help="Indexes of input file bands.")
 
-# TODO: may be better suited to cligj
+# TODO: may be better suited to cligj?
 bounds_opt = click.option(
-    '--bounds', default=None, callback=bounds_handler,
-    help='Bounds: "left bottom right top" or "[left, bottom, right, top]".')
+    "--bounds",
+    default=None,
+    callback=bounds_handler,
+    help="Bounds: 'left bottom right top' or '[left, bottom, right, top]'.",
+)
 
 dimensions_opt = click.option(
     '--dimensions',
@@ -296,7 +296,7 @@ masked_opt = click.option(
 output_opt = click.option(
     '-o', '--output',
     default=None,
-    type=click.Path(resolve_path=True),
+    type=click.Path(),
     help="Path to output file (optional alternative to a positional arg).")
 
 resolution_opt = click.option(
@@ -368,5 +368,5 @@ sequence_opt = click.option(
          "feature collection object.")
 
 format_opt = click.option(
-    '-f', '--format', '--driver', 'driver',
-    help="Output format driver")
+    "-f", "--format", "--driver", "driver", help="Output format driver."
+)

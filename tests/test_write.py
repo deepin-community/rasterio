@@ -1,17 +1,19 @@
+import logging
 import re
+from pathlib import Path
 import subprocess
-import sys
 
 import affine
 import numpy as np
 import pytest
 
+from .conftest import gdal_version
+
 import rasterio
 from rasterio.drivers import blacklist
-from rasterio.env import Env
-from rasterio.errors import RasterioIOError, DriverRegistrationError
-from rasterio._base import driver_supports_mode
-
+from rasterio.enums import MaskFlags, Resampling
+from rasterio.env import Env, GDALVersion
+from rasterio.errors import RasterioIOError
 
 def test_validate_dtype_None(tmpdir):
     """Raise TypeError if there is no dtype"""
@@ -61,7 +63,7 @@ def test_no_crs(tmpdir):
 
 @pytest.mark.gdalbin
 def test_context(tmpdir):
-    name = str(tmpdir.join("test_context.tif"))
+    name = Path(str(tmpdir.join("test_context.tif"))).as_posix()
     with rasterio.open(
             name, 'w',
             driver='GTiff', width=100, height=100, count=1,
@@ -115,7 +117,10 @@ def test_write_sbyte(tmpdir):
 
     info = subprocess.check_output(["gdalinfo", "-stats", name]).decode('utf-8')
     assert "Minimum=-33.000, Maximum=-33.000, Mean=-33.000, StdDev=0.000" in info
-    assert 'SIGNEDBYTE' in info
+    if gdal_version < GDALVersion(3, 7):
+        assert 'SIGNEDBYTE' in info
+    else:
+        assert 'Int8' in info
 
 
 @pytest.mark.gdalbin
@@ -249,10 +254,10 @@ def test_write_crs_transform_2(tmpdir, monkeypatch):
             driver='GTiff', width=100, height=100, count=1,
             crs='EPSG:32618',
             transform=transform,
-            dtype=rasterio.ubyte) as s:
-        s.write(a, indexes=1)
+            dtype=rasterio.ubyte) as src:
+        src.write(a, indexes=1)
 
-    assert s.crs.to_epsg() == 32618
+    assert src.crs.to_epsg() == 32618
     info = subprocess.check_output(["gdalinfo", name]).decode('utf-8')
     assert 'UTM zone 18N' in info
     # make sure that pixel size is nearly the same as transform
@@ -403,7 +408,7 @@ def test_too_big_for_tiff(tmpdir):
     ('jpeg', 'JPEG'),
 ])
 def test_write__autodetect_driver(tmpdir, extension, driver):
-    name = str(tmpdir.join("test.{}".format(extension)))
+    name = str(tmpdir.join(f"test.{extension}"))
     with rasterio.open(name, 'w', height=1, width=1, count=1, dtype='uint8') as rds:
         assert rds.driver == driver
 
@@ -427,3 +432,130 @@ def test_issue2088(tmpdir, capsys, driver):
     captured = capsys.readouterr()
     assert "ERROR 4" not in captured.err
     assert "ERROR 4" not in captured.out
+
+
+def test_write_cog(tmpdir, path_rgb_byte_tif):
+    """Show resolution of issue #2102"""
+    with rasterio.open(path_rgb_byte_tif) as src:
+        profile = src.profile
+        profile.update(driver="COG", extent=src.bounds, resampling=Resampling.bilinear)
+        with rasterio.open(str(tmpdir.join("test.tif")), "w", **profile) as cog:
+            cog.write(src.read())
+
+
+def test_write_masked(tmp_path):
+    """Verify that masked arrays are filled when written."""
+    data = np.ma.masked_less_equal(np.array([[0, 1, 2]], dtype="uint8"), 1)
+    data.fill_value = 3
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=3,
+        height=1,
+        dtype="uint8",
+    ) as dst:
+        dst.write(data, indexes=1)
+
+    # Expect the masked array's fill_value in the first two pixels.
+    with rasterio.open(tmp_path / "test.tif") as src:
+        assert src.mask_flag_enums == ([MaskFlags.all_valid],)
+        arr = src.read()
+        assert list(arr.flatten()) == [3, 3, 2]
+
+
+def test_write_masked_nodata(tmp_path):
+    """Verify that masked arrays are filled with nodata when written."""
+    data = np.ma.masked_less_equal(np.array([[0, 1, 2]], dtype="uint8"), 1)
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=3,
+        height=1,
+        dtype="uint8",
+        nodata=0,
+    ) as dst:
+        dst.write(data, indexes=1)
+
+    # Expect the dataset's nodata value in the first two pixels.
+    with rasterio.open(tmp_path / "test.tif") as src:
+        assert src.mask_flag_enums == ([MaskFlags.nodata],)
+        arr = src.read()
+        assert list(arr.flatten()) == [0, 0, 2]
+
+
+def test_write_masked_true(tmp_path):
+    """Verify that a mask is written when we write a masked array."""
+    data = np.ma.masked_less_equal(np.array([[0, 1, 2]], dtype="uint8"), 1)
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=3,
+        height=1,
+        dtype="uint8",
+    ) as dst:
+        dst.write(data, indexes=1, masked=True)
+
+    # Expect masked values in the first two pixels.
+    with rasterio.open(tmp_path / "test.tif") as src:
+        assert src.mask_flag_enums == ([MaskFlags.per_dataset],)
+        arr = src.read(masked=True)
+        assert list(arr.flatten()) == [np.ma.masked, np.ma.masked, 2]
+
+
+def test_write_masked_nomask(tmp_path):
+    """Verify that a mask is written when we write an optimized masked array (mask == np.ma.nomask)."""
+    data = np.ma.masked_array([[0, 1, 2]], dtype="uint8")
+
+    with rasterio.open(
+        tmp_path / "test.tif",
+        "w",
+        driver="GTiff",
+        count=1,
+        width=3,
+        height=1,
+        dtype="uint8",
+    ) as dst:
+        dst.write(data, indexes=1, masked=True)
+
+    # Expect no masked values.
+    with rasterio.open(tmp_path / "test.tif") as src:
+        assert src.mask_flag_enums == ([MaskFlags.per_dataset],)
+        arr = src.read(masked=True)
+        assert list(arr.flatten()) == [0, 1, 2]
+
+
+def test_write_int64(tmp_path):
+    test_file = tmp_path / "test.tif"
+    data = np.array([np.ones((100, 100), dtype=rasterio.int64) * 127])
+    with rasterio.open(
+        test_file,
+        'w',
+        driver='GTiff',
+        width=100,
+        height=100,
+        count=1,
+        dtype=data.dtype
+    ) as file:
+        file.write(data, [1])
+        assert file.dtypes == (rasterio.int64,)
+
+    with rasterio.open(test_file) as file:
+        assert file.dtypes == (rasterio.int64,)
+
+
+def test_open_no_log(caplog, tmp_path):
+    """See gh-2525."""
+    caplog.set_level(logging.DEBUG)
+    rasterio.open(tmp_path / "my.tif", "w", driver="GTiff", width=500, height=500, count=4, dtype=np.uint8, nodata=255)
+    assert "GDAL signalled an error" not in caplog.text
+
+

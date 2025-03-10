@@ -3,10 +3,12 @@
 import os
 import logging
 
+import numpy
 import pytest
+from numpy.testing import assert_almost_equal
 
 import rasterio
-from rasterio._err import CPLE_BaseError
+from rasterio._err import CPLE_BaseError, CPLE_AppDefinedError
 from rasterio._warp import _calculate_default_transform
 from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
@@ -184,7 +186,7 @@ def test_transform_bounds_identity():
 
 
 def test_transform_bounds_densify_out_of_bounds():
-    with pytest.raises(ValueError):
+    with pytest.raises(CPLE_AppDefinedError):
         transform_bounds(
             "EPSG:4326",
             "+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 "
@@ -198,7 +200,7 @@ def test_transform_bounds_densify_out_of_bounds():
 
 
 def test_transform_bounds_densify_out_of_bounds__geographic_output():
-    with pytest.raises(ValueError):
+    with pytest.raises(CPLE_AppDefinedError):
         transform_bounds(
             "+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 "
             "+a=6370997 +b=6370997 +units=m +no_defs",
@@ -209,6 +211,57 @@ def test_transform_bounds_densify_out_of_bounds__geographic_output():
              64,
              densify_pts=-1,
         )
+
+
+def test_transform_bounds__antimeridian():
+    transformed_bounds = transform_bounds(
+        "EPSG:4167", "EPSG:3851", 160.6, -55.95, -171.2, -25.88,
+    )
+    assert_almost_equal(
+        transformed_bounds,
+        (1722483.900174921, 5228058.6143420935, 4624385.494808555, 8692574.544944234),
+    )
+    inverse_transformed_bounds = transform_bounds(
+        "EPSG:3851", "EPSG:4167", *transformed_bounds,
+    )
+    assert_almost_equal(
+        inverse_transformed_bounds,
+        (153.2799922, -56.7471249, -162.1813873, -24.6148194),
+    )
+
+
+def test_transform_bounds__beyond_global_bounds():
+    assert_almost_equal(
+        transform_bounds(
+            "EPSG:6933",
+            "EPSG:4326",
+            -17367531.3203125,
+            -7314541.19921875,
+            17367531.3203125,
+            7314541.19921875,
+        ),
+        (-180, -85.0445994113099, 180, 85.0445994113099),
+    )
+
+
+def test_transform_bounds__ignore_inf():
+    # Depending on the GDAL version we might get an exception or inf values
+    try:
+        assert not numpy.isinf(
+            transform_bounds(
+                "EPSG:4326", "ESRI:102036", -180.0, -90.0, 180.0, 0.0,
+            )
+        ).any()
+    except CPLE_BaseError:
+        pass
+
+
+def test_transform_bounds__noop_geographic():
+    bounds = (19.57, 35.14, -168.97, 81.91)
+    assert_almost_equal(
+        transform_bounds("EPSG:4284", "EPSG:4284", *bounds),
+        bounds,
+    )
 
 
 def test_issue1131():

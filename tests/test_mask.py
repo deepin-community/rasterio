@@ -81,14 +81,23 @@ def test_raster_geometrymask_crop(basic_image_2x2, basic_image_file,
     assert window is not None and window.flatten() == (2, 2, 3, 3)
 
 
-def test_raster_geometrymask_crop_invert(basic_image_file, basic_geometry):
-    """crop and invert cannot be combined"""
+def test_raster_geometrymask_crop_invert(basic_image_2x2, basic_image_file,
+                                        basic_geometry):
+    """ Test cropping and inverting """
 
     geometries = [basic_geometry]
 
     with rasterio.open(basic_image_file) as src:
-        with pytest.raises(ValueError):
-            raster_geometry_mask(src, geometries, crop=True, invert=True)
+        geometrymask, transform, window = raster_geometry_mask(src, geometries,
+                                                            crop=True, invert=True)
+
+    image = basic_image_2x2[2:5, 2:5] == 1
+
+    assert geometrymask.shape == (3, 3)
+    assert np.array_equal(geometrymask, image)
+    assert transform == Affine(1, 0, 2, 0, 1, 2)
+    assert window is not None and window.flatten() == (2, 2, 3, 3)
+
 
 
 def test_raster_geometrymask_crop_all_touched(basic_image, basic_image_file,
@@ -215,10 +224,19 @@ def test_mask_all_touched(basic_image, basic_image_file, basic_geometry):
     assert np.array_equal(masked[0], basic_image * nodata)
 
 
-def test_mask_crop(basic_image_2x2, basic_image_file, basic_geometry):
+def test_mask_crop(basic_image_2x2, basic_image_file, basic_geometry_3d):
     """Output should be cropped to extent of geometry"""
+    geometries = [basic_geometry_3d]
+    with rasterio.open(basic_image_file) as src:
+        masked, transform = mask(src, geometries, crop=True)
 
-    geometries = [basic_geometry]
+    assert masked.shape == (1, 3, 3)
+    assert np.array_equal(masked[0], basic_image_2x2[2:5, 2:5])
+
+
+def test_mask_crop_3d(basic_image_2x2, basic_image_file, basic_geometry_3d):
+    """Output should be cropped to extent of geometry, 3D geom okay."""
+    geometries = [basic_geometry_3d]
     with rasterio.open(basic_image_file) as src:
         masked, transform = mask(src, geometries, crop=True)
 
